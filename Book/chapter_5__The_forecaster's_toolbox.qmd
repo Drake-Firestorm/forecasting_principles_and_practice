@@ -1,0 +1,1882 @@
+---
+title: "The forecaster’s toolbox"
+format: 
+  html:
+    code-fold: true
+number-sections: true
+---
+
+will describe
+    some benchmark forecasting methods,
+    procedures for checking whether a forecasting method
+        has adequately utilised the available information,
+    techniques for computing prediction intervals, and
+    methods for evaluating forecast accuracy.
+
+
+## A tidy forecasting workflow {#sec-tidy-forecasting-workflow}
+
+The process of producing forecasts for time series data can be broken down into a few steps.
+```{mermaid}
+graph TD
+Tidy --> Visualise
+Visualise --> Specify
+Specify --> Estimate
+Estimate --> Evaluate
+Estimate --> Forecast
+Evaluate --> Visualise
+```
+
+
+### Data preparation (tidy) {#sec-data-preparation}
+
+first step in forecasting is to prepare data in the correct format. </br>
+This process may involve
+- loading in data,
+- identifying missing values,
+- filtering the time series and
+- other pre-processing tasks.
+
+Many models have different data requirements,
+    some require the series to be in time order,
+    others require no missing values. </br>
+Checking your data is an essential step to understanding its features and
+    it is useful to do before models are estimated.
+
+The way in which your data is prepared can also be used
+    to explore different features of the time series. </br>
+pre-processing your dataset is an important step
+    in evaluating model performance using cross-validation.
+
+
+### Plot the data (visualise) {#sec-plot}
+
+Looking at your data
+    allows you to identify common patterns, and 
+    subsequently specify an appropriate model.
+
+```{r}
+#| label: fig-sweden-gdp-per-capita
+#| fig-cap: "GDP per capita data for Sweden from 1960 to 2017. "
+global_economy %>%
+  filter(Country == "Sweden") %>%
+  autoplot(GDP) +
+  ggtitle("GDP for Sweden") + ylab("$US billions")
+```
+
+
+### Define a model (specify) {#sec-define-model}
+
+Before fitting a model to the data,
+    we first must describe the model. </br>
+Specifying an appropriate model for the data
+    is essential for producing appropriate forecasts.
+
+Models in R are specified using model functions,
+    which each use a formula `(y ~ x)` interface. </br>
+The response variable(s) are specified on the left of the formula, and
+    the structure of the model is written on the right.
+
+**e.g.**
+```{r}
+TSLM(GDP ~ trend())
+```
+
+In this case
+    the model function is `TSLM()` (**time series linear model**),
+    the response variable is `GDP` and
+    it is being modelled using `trend()`
+        (*a "special" function specifying a linear trend*).
+
+The special functions used to define the model's structure 
+    vary between models
+    (as each model can support different structures).
+
+The left side of the formula 
+    also supports the transformations discussed in
+    @sec-transformations-adjustments (Chapter 3),
+    which can be useful in
+        simplifying the time series patterns or 
+        constraining the forecasts to be between specific values.
+
+
+### Train the model (estimate) {#sec-train-model}
+
+Once an appropriate model is specified,
+    we next train the model on some data. </br>
+One or more model specifications can be estimated
+    using the `model()` function.
+```{r}
+fit <- global_economy %>%
+  model(trend_model = TSLM(GDP ~ trend()))
+
+fit
+```
+
+The resulting object is a **model table** or a **mable**. </br>
+> **model table** or a **mable** </br>
+Each row corresponds to one combination of the key variables. </br>
+The `trend_model` column 
+    contains information about the fitted model for each country.
+
+
+### Check model performance (evaluate) {#sec-check-model-performance}
+
+Once a model has been fitted, 
+    it is important to check how well it has performed on the data. </br>
+There are several diagnostic tools available to check model behaviour, and
+    also accuracy measures that allow one model to be compared against another. </br>
+@sec-evaluating-point-forecast-accuracy and @sec-evaluating-distributional-forecast-accuracy go into further details.
+
+
+### Produce forecasts (forecast) {#sec-produce-forecasts}
+
+With an appropriate model 
+    specified, estimated and checked,
+    it is time to produce the forecasts using `forecast()`. </br>
+The easiest way to use this function is
+    by specifying the number of future observations to forecast. </br>
+**example**
+    forecasts for the next 10 observations can be generated using `h = 10`. </br>
+can also use natural language;
+    **e.g.**,
+    `h = "2 years"` can be used to predict two years into the future.
+
+In other situations,
+    it may be more convenient to provide a dataset
+    of future time periods to forecast. </br>
+This is commonly required
+    when your model uses additional information from the data,
+    such as variables for exogenous regressors. </br>
+Additional data required by the model
+    can be included in the dataset of observations to forecast.
+
+```{r}
+fit %>% forecast(h = "3 years")
+```
+
+This is a **forecasting table**, or **fable**. </br>
+> **forecasting table**, or **fable** </br>
+Each row
+    corresponds to one forecast period for each country. </br>
+The `GDP` column contains the forecasting distribution, while
+    the `.mean` column contains the point forecast. </br>
+The **point forecast**
+    is the mean (or average) of the forecasting distribution.
+
+The forecasts can be plotted along with the historical data 
+    using `autoplot()` as follows.
+```{r}
+#| label: fig-sweden-gdp-per-capita-forecasts
+#| fig-cap: "Forecasts of GDP per capita for Sweden using a simple trend model."
+fit %>%
+  forecast(h = "3 years") %>%
+  filter(Country == "Sweden") %>%
+  autoplot(global_economy) +
+  ggtitle("GDP for Sweden") + ylab("$US billions")
+```
+
+
+## Some simple forecasting methods {#sec-simple-forecasting-methods}
+
+Some forecasting methods are extremely simple and surprisingly effective.
+
+```{r}
+bricks <- aus_production %>%
+    filter_index("1970" ~ "2004")
+
+# alternate
+bricks <- aus_production %>% 
+    filter(between(year(Quarter), 1970, 2004))   
+```
+
+`filter_index()` function
+    is a convenient shorthand for extracting a section of a time series.
+
+
+### Average method {#sec-average-method}
+
+Here, the forecasts of all future values are equal to
+    the average (or "mean") of the historical data. </br>
+If we let the historical data be denoted by $y_1, \dots, y_T$,
+    then we can write the forecasts as
+$$
+\hat{y}_{T+h|T} = \bar{y} = (y_{1} + \dots + y_{T})/T
+$$
+. </br>
+The notation $\hat{y}_{T+h|T}$
+    is a short-hand for the estimate of $y_{T+h}$
+    based on the data $y_1, \dots, y_T$.
+
+```{r}
+#| label: fig-australian-clay-brick-production-mean-forecast
+#| fig-cap: "Mean (or average) forecasts applied to clay brick production in Australia."
+bricks %>%
+  model(MEAN(Bricks)) %>%
+  forecast(h = "10 years") %>%
+  autoplot(bricks) +
+  ggtitle("Clay brick production in Australia")
+```
+
+
+### Naïve method {#sec-naïve-method}
+
+For naïve forecasts,
+    simply set all forecasts to be the value of the last observation. </br>
+That is, $\hat{y}_{T+h|T} = y_{T}$. </br>
+This method **works remarkably well for** many economic and financial time series.
+
+```{r}
+#| label: fig-australian-clay-brick-production-naïve-forecast
+#| fig-cap: "Naïve forecasts applied to clay brick production in Australia."
+bricks %>%
+  model(NAIVE(Bricks)) %>%
+  forecast(h = "10 years") %>%
+  autoplot(bricks) +
+  ggtitle("Clay brick production in Australia")
+```
+
+### Seasonal naïve method {#sec-seasonal-naïve-method}
+
+A similar method is useful for highly seasonal data. </br>
+In this case,
+    set each forecast to be equal to the last observed value
+    from the same season of the year
+    (**e.g.**, the same month of the previous year). </br>
+Formally, the forecast for time $T+h$ is written as
+$\hat{y}_{T+h|T} = y_{T+h-m(k+1)}$,
+where
+    $m$ = the seasonal period, and 
+    $k$ is the integer part of $(h-1)/m$
+        (i.e., the number of complete years
+        in the forecast period prior to time $T+h$). </br>
+**example**
+    with monthly data,
+        the forecast for all future February values
+        is equal to the last observed February value. </br>
+    With quarterly data,
+        the forecast of all future Q2 values
+        is equal to the last observed Q2 value
+        (where Q2 means the second quarter). </br>
+Similar rules apply for other months and quarters, and for other seasonal periods.
+
+```{r}
+#| label: fig-australian-clay-brick-production-seasonal-naïve-forecasts
+#| fig-cap: "Seasonal naïve forecasts applied to clay brick production in Australia."
+bricks %>%
+  model(SNAIVE(Bricks ~ lag("year"))) %>%
+  forecast(h = "10 years") %>%
+  autoplot(bricks) +
+  ggtitle("Clay brick production in Australia")
+```
+
+The `lag()` function
+    is optional here
+    as bricks is quarterly data and
+    so a seasonal naïve model will need a one-year lag. </br>
+However, for some time series there is more than one seasonal period,
+    and then the required lag must be specified.
+
+
+### Drift method {#sec-drift-method}
+
+> **drift** </br>
+A variation on the naïve method is to
+    allow the forecasts to increase or decrease over time,
+    where the amount of change over time (called the **drift**)
+    is set to be the average change seen in the historical data.
+
+Thus the forecast for time $T+h$ is given by
+$$
+\hat{y}_{T+h|T} = y_{T} + \frac{h}{T-1}\sum_{t=2}^T (y_{t} - y_{t-1})
+                = y_{T} + h \left( \frac{y_{T} - y_{1}}{T-1}\right)
+$$
+. </br>
+This is equivalent to
+    drawing a line between the first and last observations, and 
+    extrapolating it into the future.
+
+```{r}
+#| label: fig-australian-clay-brick-production-drift-forecasts
+#| fig-cap: "Drift forecasts applied to clay brick production in Australia."
+bricks %>%
+  model(RW(Bricks ~ drift())) %>%
+  forecast(h = "10 years") %>%
+  autoplot(bricks) +
+  ggtitle("Clay brick production in Australia")
+```
+
+
+### Example: Australian quarterly beer production {#sec-eg-aus-quarterly-beer-production}
+
+```{r}
+# Set training data from 1992 to 2006
+train <- aus_production %>% 
+    filter_index("1992 Q1" ~ "2006 Q4")
+
+# Fit the models
+beer_fit <- train %>%
+  model(
+    Mean = MEAN(Beer),
+    `Naïve` = NAIVE(Beer),
+    `Seasonal naïve` = SNAIVE(Beer)
+  )
+
+# Generate forecasts for 14 quarters
+beer_fc <- beer_fit %>% 
+    forecast(h = 14)
+
+
+# Plot forecasts against actual values
+#| label: fig-australian-beer-production-forecasts
+#| fig-cap: "Forecasts of Australian quarterly beer production."
+beer_fc %>%
+  autoplot(train, level = NULL) +
+  autolayer(filter_index(aus_production, "2007 Q1" ~ .), color = "black") +
+  ggtitle("Forecasts for quarterly beer production") +
+  xlab("Year") + ylab("Megalitres") +
+  guides(colour = guide_legend(title = "Forecast"))
+```
+
+In this case, only the seasonal naïve forecasts
+    are close to the observed values from 2007 onwards.
+
+
+### Example: Google's daily closing stock price {#sec-eg-google-daily-closing-stock-price}
+
+non-seasonal methods are applied to Google's daily closing stock price in 2015,
+    and used to forecast one month ahead. </br>
+Because stock prices are not observed every day,
+    first set up a new time index
+    based on the trading days 
+    rather than calendar days.
+
+```{r}
+# Re-index based on trading days
+google_stock <- gafa_stock %>%
+  filter(Symbol == "GOOG") %>%
+  mutate(day = row_number()) %>%
+  update_tsibble(index = day, regular = TRUE)
+
+# Filter the year of interest
+google_2015 <- google_stock %>%
+    filter(year(Date) == 2015)
+
+# Fit the models
+google_fit <- google_2015 %>%
+  model(
+    Mean = MEAN(Close),
+    `Naïve` = NAIVE(Close),
+    Drift = NAIVE(Close ~ drift())
+  )
+
+# Produce forecasts for the 19 trading days in January 2015
+google_fc <- google_fit %>% 
+    forecast(h = 19)
+
+# A better way using a tsibble to determine the forecast horizons
+google_jan_2016 <- google_stock %>%
+  filter(yearmonth(Date) == yearmonth("2016 Jan"))
+
+google_fc <- google_fit %>% 
+    forecast(google_jan_2016)
+
+
+# Plot the forecasts
+#| label: fig-google-daily-closing-stock-price-forecasts
+#| fig-cap: "Forecasts based on Google’s daily closing stock price in 2015."
+google_fc %>%
+  autoplot(google_2015, level = NULL) +
+  autolayer(google_jan_2016, Close, color = "black") +
+  ggtitle("Google stock (daily ending 31 Dec 2015)") +
+  xlab("Day") + ylab("Closing Price (US$)") +
+  guides(colour = guide_legend(title = "Forecast"))
+```
+
+Sometimes one of these simple methods
+    will be the best forecasting method available;
+    but in many cases,
+        these methods will serve as benchmarks
+        rather than the method of choice. </br>
+That is, any forecasting methods we develop
+    will be compared to these simple methods
+    to ensure that the new method is better than these simple alternatives. </br>
+If not,
+    the new method is not worth considering.
+
+
+## Fitted values and residuals {#sec-fitted-values-residuals}
+
+### Fitted values {#sec-fitted-values}
+
+Each observation in a time series can be forecast using all previous observations. </br>
+We call these **fitted values** and
+    they are denoted by $\hat{y}_{t|t-1}$,
+    meaning the forecast of $y_t$ based on observations $y_1, \dots, y_{t-1}$. </br>
+We use these so often,
+    we sometimes drop part of the subscript and
+    just write $\hat{y}_t$ instead of $\hat{y}_{t|t-1}$. </br>
+Fitted values always involve one-step forecasts.
+
+Actually, fitted values are often not true forecasts
+    because any parameters involved in the forecasting method
+    are estimated using all available observations in the time series,
+    including future observations. </br>
+**example**, 
+    if we use the average method,
+        the fitted values are given by $\hat{y}_t = \hat{c}$
+        where
+            $\hat{c}$ is the average computed over all available observations,
+            including those at times after $t$. </br>
+Similarly, for the **drift method**,
+    the drift parameter is estimated using all available observations. </br>
+In this case, the fitted values are given by
+$\hat{y}_t = y_{t-1} + \hat{c}$
+where
+    $\hat{c} = (y_T - y_1)/(T-1)$.
+
+In both cases,
+    there is a parameter to be estimated from the data. </br>
+The **hat** above the $c$ reminds us that this is an estimate. </br>
+When the estimate of $c$ involves observations after time $t$,
+    the fitted values are not true forecasts. </br>
+On the other hand,
+    **naïve** or **seasonal naïve** forecasts do not involve any parameters,
+    and so fitted values are true forecasts in such cases.
+
+
+### Residuals {#sec-residuals}
+
+The **residuals** in a time series model
+    are what is left over after fitting a model. </br>
+For many (but not all) time series models,
+    the residuals are **equal to**
+    the difference between the observations and the corresponding fitted values:
+$e_{t} = y_{t} - \hat{y}_{t}$.
+
+`augment()`
+    function for obtaining fitted values and residuals from a model. </br>
+There are three new columns added to the original data:
+- `.fitted` contains the fitted values;
+- `.resid` contains the residuals;
+- `.innov` contains the “innovation residuals”.
+```{r}
+augment(beer_fit)
+```
+
+In this case, innovation residuals are identical to the regular residuals
+
+Residuals are **useful in** 
+    checking whether a model has adequately captured the information in the data. </br>
+For this purpose, we use innovation residuals. </br>
+If patterns are observable in the residuals,
+    the model can probably be improved.
+
+
+## Residual diagnostics {#sec-residual-diagnostics}
+
+A good forecasting method will yield residuals with the following properties:
+
+1. The residuals are uncorrelated.
+    If there are correlations between residuals,
+    then there is information left in the residuals
+    which should be used in computing forecasts.
+2. The residuals have zero mean.
+    If the residuals have a mean other than zero,
+    then the forecasts are biased.
+
+Any forecasting method that does not satisfy these properties can be improved. </br>
+However, that does not mean that forecasting methods that satisfy these properties
+    cannot be improved. </br>
+It is possible to have several different forecasting methods for the same data set,
+    all of which satisfy these properties. </br>
+Checking these properties is important
+    in order to see whether a method is using all of the available information,
+    but it is not a good way to select a forecasting method.
+
+If either of these properties is not satisfied,
+    then the forecasting method can be modified to give better forecasts. </br>
+Adjusting for bias is easy: 
+    if the residuals have mean $m$,
+    then simply add $m$ to all forecasts
+    and the bias problem is solved. </br>
+Fixing the correlation problem is harder,
+    and we will not address it until
+    [Chapter 10](./chapter_10__Dynamic_regression_models.qmd).
+
+In addition to these essential properties,
+    it is useful
+    (but not necessary)
+    for the residuals to also have the following two properties:
+
+3. The residuals have constant variance.
+4. The residuals are normally distributed.
+
+These two properties
+    make the calculation of prediction intervals easier
+    (see @sec-distributional-forecasts-prediction-intervals for an example). </br>
+However, a forecasting method that does not satisfy these properties
+    cannot necessarily be improved. </br>
+Sometimes applying a **Box-Cox transformation** may assist with these properties,
+    but otherwise there is usually little that you can do to ensure
+    that your residuals have constant variance and a normal distribution. </br>
+Instead, an alternative approach to obtaining prediction intervals is necessary.
+
+
+### Example: Forecasting the Google daily closing stock price {#sec-eg-google-daily-closing-stock-price-forecast}
+
+For stock market prices and indexes,
+    the best forecasting method is often the naïve method. </br>
+That is, each forecast is simply equal to the last observed value, or
+    $\hat{y}_t = y_{t-1}$. </br>
+Hence, the residuals are simply equal to
+    the difference between consecutive observations:
+$e_{t} = y_{t} - \hat{y}_{t} = y_{t} - y_{t-1}$.
+
+The large jump corresponds to 17 July 2015
+    when the price jumped 16% due to unexpectedly strong second quarter results.
+```{r}
+#| label: fig-daily-google-stock-prices-2015
+#| fig-cap: "Daily Google stock prices in 2015."
+google_2015 %>%
+    autoplot(Close) +
+    labs(x = "Day", y = "Closing Price (US$)", title = "Google Stock in 2015")
+```
+
+The large positive residual is a result of the unexpected price jump in July.
+```{r}
+aug <- google_2015 %>%
+  model(NAIVE(Close)) %>%
+  augment()
+
+
+#| label: fig-daily-google-stock-prices-forecast-residual
+#| fig-cap: "Residuals from forecasting the Google stock price using the naïve method."
+aug %>%
+  autoplot(.resid) +
+  labs(x = "Day", y = "Residual", title = "Residuals from naïve method")
+```
+
+The right tail seems a little too long for a normal distribution.
+```{r}
+#| label: fig-daily-google-stock-prices-forecast-residual-histogram
+#| fig-cap: "Histogram of the residuals from the naïve method applied to the Google stock price. The right tail seems a little too long for a normal distribution."
+aug %>%
+  ggplot(aes(x = .resid)) +
+  geom_histogram() +
+  labs(title = "Histogram of residuals")
+```
+
+The lack of correlation suggesting the forecasts are good.
+```{r}
+#| label: fig-daily-google-stock-prices-forecast-residual-acf
+#| fig-cap: "ACF of the residuals from the naïve method applied to the Google stock price. The lack of correlation suggesting the forecasts are good."
+aug %>%
+  ACF(.resid) %>%
+  autoplot() +
+  labs(title = "ACF of residuals")
+```
+
+```{r}
+aug %>%
+  filter(!is.na(.resid)) %>%
+  filter(.resid != max(.resid)) %>%
+  mean(.resid)
+```
+
+These graphs show that the naïve method produces forecasts
+    that appear to account for all available information. </br>
+The mean of the residuals is close to zero and
+    there is no significant correlation in the residuals series. </br>
+The time plot of the residuals shows that
+    the variation of the residuals stays much the same across the historical data,
+    apart from the one outlier, and
+    therefore the residual variance can be treated as constant. </br>
+This can also be seen on the histogram of the residuals. </br>
+The histogram suggests that the residuals may not be normal -
+    the right tail seems a little too long, even when we ignore the outlier. </br>
+Consequently, forecasts from this method will probably be quite good,
+    but prediction intervals that are computed assuming a normal distribution
+    may be inaccurate.
+
+A convenient shortcut for producing these residual diagnostic graphs is the
+`gg_tsresiduals()`
+    will produce a time plot, ACF plot and histogram of the residuals.
+
+```{r}
+#| label: fig-daily-google-stock-prices-forecast-gg-residual
+#| fig-cap: "Residual diagnostic graphs for the naïve method applied to the Google stock price."
+google_2015 %>%
+  model(NAIVE(Close)) %>%
+  gg_tsresiduals()
+```
+
+
+### Portmanteau tests for autocorrelation {#sec-portmanteau-tests-autocorrelation}
+
+In addition to looking at the ACF plot,
+    can also do a more formal test for autocorrelation
+    by considering a whole set of $r_k$ values as a group,
+    rather than treating each one separately.
+
+Recall that $r_k$ is the 
+    autocorrelation for lag k. </br>
+When we look at the ACF plot
+    to see whether each spike is within the required limits,
+    we are implicitly carrying out multiple hypothesis tests,
+    each one with a small probability of giving a false positive. </br>
+When enough of these tests are done,
+    it is likely that at least one will give a false positive, and
+    so we may conclude that the residuals have some remaining autocorrelation,
+    when in fact they do not.
+
+In order to overcome this problem,
+    we test whether the first $\ell$ autocorrelations
+    are significantly different from what would be expected
+    from a white noise process.
+> **portmanteau test** </br>
+A test for a group of autocorrelations,
+from a French word describing a suitcase or coat rack carrying several items of clothing.
+
+> **Box-Pierce test** </br>
+One such test is the **Box-Pierce test**, based on the following statistic
+$Q = T \sum_{k=1}^\ell r_k^2$
+where
+    $\ell$ is the maximum lag being considered and
+    $T$ is the number of observations.
+
+If each $r_k$ is close to zero,
+    then $Q$ will be small. </br>
+If some $r_k$ values are large (positive or negative),
+    then $Q$ will be large. </br>
+We suggest using
+    $\ell = 10$ for non-seasonal data and
+    $\ell = 2m$ for seasonal data, 
+    where $m$ is the period of seasonality. </br>
+However, the test is not good when $\ell$ is large,
+    so if these values are larger than $T/5$, then use $\ell = T/5$
+    therefore, $min(10, T/5)$ or $min(2m, T/5)$
+
+> **Ljung-Box test** </br>
+A related (and more accurate) test is the **Ljung-Box test**, based on
+$Q^* = T(T+2) \sum_{k=1}^\ell (T-k)^{-1}r_k^2$
+
+Again, large values of $Q*$ suggest that
+    the autocorrelations do not come from a white noise series.
+
+**How large is too large?** </br>
+If the autocorrelations did come from a white noise series,
+    then both $Q$ and $Q*$ would have
+    a $\chi^2$ distribution with $\ell - K$ degrees of freedom,
+    where $K$ is the number of parameters in the model. </br>
+If they are calculated from raw data (rather than the residuals from a model),
+    then set $K = 0$.
+
+For the Google stock price example,
+    the naïve model has no parameters,
+    so $K=0$ in that case also. </br>
+$\text{lag} = h$ and $\text{fitdf} = K$
+```{r}
+aug %>%
+    features(.resid, box_pierce, lag = 10, dof = 0)
+ 
+aug %>%
+    features(.resid, ljung_box, lag = 10, dof = 0)
+```
+
+For both $Q$ and $Q*$,
+    the results are not significant
+    (i.e., the $p$-values are relatively large). </br>
+Thus, we can conclude that the residuals
+    are not distinguishable from a white noise series.
+
+An alternative simple approach
+    that may be appropriate for forecasting the Google daily closing stock price
+    is the drift method.
+> `tidy()`
+shows the one estimated parameter, the **drift coefficient**,
+    measuring the average daily change observed in the historical data.
+
+```{r}
+fit <- google_2015 %>% 
+    model(RW(Close ~ drift()))
+
+fit %>% tidy()
+```
+
+Applying the **Ljung-Box test**,
+    we set $K = 1$ to account for the estimated parameter.
+```{r}
+augment(fit) %>% 
+    features(.resid, ljung_box, lag = 10, dof = 1)
+```
+
+As with the naïve approach,
+    the residuals from the drift method
+    are indistinguishable from a white noise series.
+
+
+## Distributional forecasts and prediction intervals {#sec-distributional-forecasts-prediction-intervals}
+
+### Forecast distributions {#sec-forecast-distributions}
+
+As discussed in @sec-statistical-forecasting-perspective (Chapter 1),
+    we express the uncertainty in our forecasts
+    using a **probability distribution**.
+
+> **probability distribution** </br>
+It describes the probability of observing possible future values using the fitted model.
+
+> **point forecast** </br>
+is the mean of this distribution.
+
+Most time series models produce **normally distributed forecasts** - 
+    that is, we assume that the distribution of possible future values
+    follows a normal distribution.
+
+
+### Prediction intervals {#sec-prediction-intervals}
+
+> A **prediction interval**  
+gives an interval within which we expect $y_t$ to lie with a specified probability.
+
+**example**,
+assuming that distribution of future observations is normal, 
+    a 95% prediction interval for the $h$-step forecast is
+    $\hat{y}_{T+h|T} \pm 1.96 \hat\sigma_h$
+where
+    $\hat\sigma_h$
+        is an estimate of the standard deviation of
+        the $h$-step forecast distribution.
+
+More generally, a **prediction interval** can be written as
+    $\hat{y}_{T+h|T} \pm c \hat\sigma_h$
+where
+    the multiplier $c$
+        depends on the coverage probability. </br>
+In this book we usually calculate
+    80% intervals and
+    95% intervals,
+    although any percentage may be used. 
+
+The value of prediction intervals is that
+    they express the uncertainty in the forecasts. </br>
+If we only produce point forecasts,
+    there is no way of telling how accurate the forecasts are. </br>
+However, if we also produce prediction intervals,
+    then it is clear how much uncertainty is associated with each forecast. </br>
+For this reason,
+    point forecasts can be of almost no value
+    without the accompanying prediction intervals.
+
+
+### One-step prediction intervals {#sec-one-step-prediction-intervals}
+
+When forecasting one step ahead,
+    the standard deviation of the forecast distribution is almost the same
+    as the standard deviation of the residuals. </br>
+    (In fact,
+        the two standard deviations are identical
+        if there are no parameters to be estimated,
+        as is the case with the naïve method.  
+    For forecasting methods involving parameters to be estimated,
+        the standard deviation of the forecast distribution 
+        is slightly larger than the residual standard deviation,
+        although this difference is often ignored.)
+
+When forecasting one step ahead,
+    the standard deviation of the forecast distribution can be estimated
+    using the standard deviation of the residuals
+    given by
+$$
+\hat{\sigma} = \sqrt{\frac{1}{T-K-M}\sum_{t=1}^T e_t^2}
+$$ {#eq-standard-deviation-of-residuals}
+where
+    $K$ is the number of parameters estimated in the forecasting method, and
+    $M$ is the number of missing values in the residuals.
+        (For **example**, $M=1$ for a naive forecast,
+        because we can’t forecast the first observation.)
+
+**example**,
+    consider a naïve forecast for the Google stock price data `google_2015`
+        (shown in @fig-google-daily-closing-stock-price-forecasts). </br>
+    The last value of the observed series is 758.88,
+        so the forecast of the next value of the price is 758.88. </br>
+    The standard deviation of the residuals from the naïve method,
+        as given by @eq-standard-deviation-of-residuals, is 11.19. </br>
+    Hence, a 95% prediction interval for the next value of the GSP is
+        $758.88 \pm 1.96(11.19) = [736.9, 780.8]$. </br>
+    Similarly, an 80% prediction interval is given by
+        $758.88 \pm 1.28(11.19) = [744.5, 773.2]$.
+
+
+### Multi-step prediction intervals {#sec-multi-step-prediction-intervals}
+
+A common feature of prediction intervals is that
+    they increase in length as the forecast horizon increases. </br>
+The further ahead we forecast,
+    the more uncertainty is associated with the forecast,
+    and thus the wider the prediction intervals. </br>
+That is, $\sigma_h$ usually increases with $h$
+    (although there are some non-linear forecasting methods
+    that do not have this property).
+
+To produce a prediction interval,
+    it is necessary to have an estimate of $\sigma_h$. </br>
+As already noted,
+    for one-step forecasts ($h=1$),
+    @eq-standard-deviation-of-residuals provides a good estimate
+    of the forecast standard deviation $\sigma_h$. </br>
+For multi-step forecasts,
+    a more complicated method of calculation is required. </br>
+These calculations assume that the residuals are uncorrelated.
+
+
+### Benchmark methods {#sec-benchmark-methods}
+
+For the four benchmark methods,
+    it is possible to mathematically derive the forecast standard deviation
+    under the assumption of uncorrelated residuals. </br>
+If $\hat{\sigma}_h$ denotes the standard deviation
+    of the $h$-step forecast distribution, and
+    $\hat{\sigma}$ is the residual standard deviation,
+    then we can use the expressions shown in
+    Table @tbl-multi-step-forecast-standard-deviation. </br>
+Note that when $h=1$ and $T$ is large,
+    these all give the same approximate value $\hat\sigma$.
+
+| Benchmark method | $h$-step forecast standard deviation |
+|:---------------- | :----------------------------------- |
+| Mean             | $\hat\sigma_h = \hat\sigma \sqrt{1 + 1/T}$ |
+| Naïve            | $\hat\sigma_h = \hat\sigma \sqrt{h}$ |
+| Seasonal naïve   | $\hat\sigma_h = \hat\sigma \sqrt{k+1}$ |
+| Drift            | $\hat\sigma_h = \hat\sigma \sqrt{h(1+h/(T-1))}$ |
+
+: Multi-step forecast standard deviation for the four benchmark methods,
+    where $\sigma$ is the residual standard deviation,
+    $m$ is the seasonal period, and
+    $k$ is the integer part of $(h-1) / m$
+        (i.e., the number of complete years in the forecast period
+        prior to time $T+h$). {#tbl-multi-step-forecast-standard-deviation}
+
+Prediction intervals can easily be computed for you when using the `fable` package.
+```{r}
+google_2015 %>%
+  model(NAIVE(Close)) %>%
+  forecast(h = 10) %>%
+  hilo()
+```
+
+> `hilo()`
+converts the forecast distributions into intervals.
+
+By default,
+    80% and 95% prediction intervals are returned,
+    although other options are possible
+    via the `level` argument.
+```{r}
+#| label: fig-google-closing-stock-price-prediction-intervals
+#| fig-cap: "80% and 95% prediction intervals for the Google closing stock price based on a naïve method."
+google_2015 %>%
+  model(NAIVE(Close)) %>%
+  forecast(h = 10) %>%
+  autoplot(google_2015)
+```
+
+
+### Prediction intervals from bootstrapped residuals {#sec-prediction-intervals-bootstrapped-residuals}
+
+When a normal distribution for the residuals is an unreasonable assumption,
+    one alternative is to use **bootstrapping**,
+    which only assumes that the residuals are uncorrelated with constant variance.
+
+A one-step forecast error is defined as $e_t = y_t - \hat{y}_{t|t-1}$. </br>
+For a naïve forecasting method, $\hat{y}_{t|t-1} = y_{t-1}$,
+    so we can rewrite this as $y_t = y_{t-1} + e_t$. </br>
+Assuming future errors will be similar to past errors,
+    when $t > T$
+    we can replace $e_{t}$
+    by sampling from the collection of errors we have seen in the past
+        (i.e., the residuals). </br>
+So we can simulate the next observation of a time series
+    using $y^*_{T+1} = y_{T} + e^*_{T+1}$
+    where $e^*_{T+1}$ is a randomly sampled error from the past,
+    and $y^*_{T+1}$ is the possible future value that would arise
+        if that particular error value occurred. </br>
+We use a $*$ to indicate that this is not the observed $y_{T+1}$ value,
+    but one possible future that could occur. </br>
+Adding the new simulated observation to our data set,
+    we can repeat the process to obtain $y^*_{T+2} = y_{T+1}^* + e^*_{T+2}$,
+        where $e^*_{T+2}$ is another draw from the collection of residuals. </br>
+Continuing in this way, we can simulate
+    an entire set of future values for our time series.
+
+Doing this repeatedly,
+    we obtain many possible futures.
+ 
+>`generate()`  
+To see some of many possible futures
+
+```{r}
+fit <- google_2015 %>%
+  model(NAIVE(Close))
+ 
+sim <- fit %>%
+    generate(h = 30, times = 5, bootstrap = TRUE)
+```
+
+Here we have generated five possible sample paths for the next 30 trading days. </br>
+The `.rep` variable
+    provides a new key for the tsibble. </br>
+The plot below shows the five sample paths along with the historical data.
+```{r}
+#| label: fig-google-closing-stock-price-bootstrap
+#| fig-cap: "Five simulated future sample paths of the Google closing stock price based on a naïve method with bootstrapped residuals."
+google_2015 %>%
+  ggplot(aes(x = day)) +
+  geom_line(aes(y = Close)) +
+  geom_line(aes(y = .sim, colour = as.factor(.rep)), data = sim) +
+  labs(title = "Google closing stock price") +
+  guides(col = FALSE)
+```
+
+Then we can compute prediction intervals
+    by calculating percentiles of the future sample paths
+    for each forecast horizon. </br>
+The result is called a **bootstrapped prediction interval**. </br>
+The name **bootstrap**
+    is a reference to pulling ourselves up by our bootstraps,
+    because the process allows us to measure future uncertainty
+    by only using the historical data.
+
+This is all built into the `forecast()` function
+    so you do not need to call `generate()` directly
+```{r}
+fc <- fit %>%
+    forecast(h = 30, bootstrap = TRUE)
+```
+
+Notice that the forecast distribution is now represented
+    as a simulation with 5000 sample paths. </br>
+Because there is no normality assumption,
+    the prediction intervals are not symmetric.
+```{r}
+#| label: fig-google-closing-stock-price-naïve-bootstrap
+#| fig-cap: "Forecasts of the Google closing stock price based on a naïve method with bootstrapped residuals."
+fc %>%
+  autoplot(google_2015) +
+  labs(title = "Google closing stock price")
+```
+
+The number of samples can be controlled
+    using the `times` argument for `forecast()`.
+```{r}
+google_2015 %>%
+  model(NAIVE(Close)) %>%
+  forecast(h = 10, bootstrap = TRUE, times = 1000) %>%
+  hilo()
+```
+
+In this case,
+    they are similar
+    (but not identical)
+    to the prediction intervals based on the normal distribution.
+
+
+## Forecasting using transformations {#sec-forecasting-using-transformations}
+
+When forecasting from a model with transformations,
+    we first produce forecasts of the transformed data. </br>
+Then, we need to reverse the transformation (or **back-transform**)
+    to obtain forecasts on the original scale. </br>
+The **reverse Box-Cox transformation** is given by
+$$
+y_{t} = \begin{cases}
+    \exp(w_{t}) & \text{if $\lambda = 0$};\\
+    \text{sign}(\lambda w_t + 1)|\lambda w_t + 1|^{1/\lambda} & \text{otherwise}.
+\end{cases}
+$$ {#eq-box-cox-back-transform}
+
+`fable` package
+    will automatically back-transform the forecasts
+    whenever a transformation has been used in the model definition. </br>
+The back-transformed forecast distribution
+    is then a **transformed Normal** distribution.
+
+
+### Prediction intervals with transformations {#sec-prediction-intervals-with-transformations}
+
+If a transformation has been used,
+    then the prediction interval is first computed on the transformed scale,
+    then the end points are back-transformed
+    to give a prediction interval on the original scale. </br>
+This approach preserves the probability coverage of the prediction interval,
+    although it will no longer be symmetric around the point forecast.
+
+The back-transformation of prediction intervals
+    is done automatically for `fable` models,
+    provided that you have used a transformation in the model formula.
+
+Transformations sometimes
+    make little difference to the point forecasts
+    but have a large effect on prediction intervals.
+
+
+### Forecasting with constraints {#sec-forecasting-with-constraints}
+
+One common use of transformations
+    is to ensure the forecasts remain on the appropriate scale. </br>
+**example**,  
+**log transformations** 
+    constrain the forecasts to stay positive
+    (because the back transformation is $\exp(w_{t})$).
+
+Another useful transformation is the
+> **scaled logit**,
+    which can be used to ensure that
+    the forecasts are kept within a specific interval.
+
+A **scaled logit** that ensures the forecasted values
+    are between $a$ and $b$ (where $a < b$) is given by:
+$w_t = f(y_t) = \log(\frac{y_t - a}{b - y_t})$
+
+Inverting this transformation gives the appropriate back-transformation of:
+$$
+y_t = \frac{a + b\exp(w_t)}{1 + \exp(w_t)}
+    = \frac{(b - a)\exp(w_t)}{1 + \exp(w_t)} + a
+$$
+
+To use this transformation when modelling,
+    we can create a new transformation with the `new_transformation()` function,
+    which is essentially a function factory. </br>
+This allows us to define two functions that accept the same parameters,
+    where the observations are provided as the first argument. </br>
+The first argument of `new_transformation()`
+    `transformation`,
+        should be a function that is used to transform the data,
+    the second `inverse`
+        is used to back-transform forecasts
+```{r}
+scaled_logit <- new_transformation(
+  transformation = function(x, lower = 0, upper = 1) {
+    log(x - lower) / (upper - x)
+  },
+  inverse = function(x, lower = 0, upper = 1) {
+    (upper - lower) * exp(x) / (1 + exp(x)) + lower
+  }
+)
+```
+
+With this new tranformation function defined,
+    it is now possible to restrict forecasts to be within a specific interval. </br>
+**example**,
+    to restrict the forecasts to be between 0 and 100
+    you could use `scaled_logit(y, 0, 100)`
+    as the model's left hand side formula.
+
+
+### Bias adjustments {#sec-bias-adjustments}
+
+One issue with using mathematical transformations
+    such as **Box-Cox transformations** is that
+    the back-transformed point forecast
+    will not be the *mean* of the forecast distribution. </br>
+In fact, it will usually be the *median* of the forecast distribution
+    (assuming that the distribution on the transformed space is symmetric). </br>
+For many purposes, this is acceptable,
+    but occasionally the mean forecast is required. </br>
+For **example**,
+    you may wish to add up sales forecasts from various regions
+    to form a forecast for the whole country. </br>
+    But medians do not add up, whereas means do.
+
+For a **Box-Cox transformation**,
+    the back-transformed mean is given (approximately) by  
+$$
+\hat{y}_{T+h|T} = \begin{cases}
+    \exp(\hat{w}_{T+h|T}) \left[1 + \frac{\sigma_h^2}{2}\right] & \text{if $\lambda=0$;} \\
+    (\lambda \hat{w}_{T+h|T}+1)^{1/\lambda} \left[1 + \frac{\sigma_h^2(1-\lambda)}{2(\lambda \hat{w}_{T+h|T} + 1)^{2}}\right] & \text{otherwise;}
+\end{cases}
+$$ {#eq-box-cox-back-transform-mean}
+where
+    $\hat{w}_{T+h|T}$ is the $h$-step forecast mean and
+    $\sigma_h^2$ is the $h$-step forecast variance on the transformed scale. </br>
+The larger the forecast variance,
+    the bigger the difference between the mean and the median.
+
+> **bias** </br>
+The difference between the 
+    simple back-transformed forecast given by @box-cox-back-transform and
+    the mean given by @eq-box-cox-back-transform-mean. </br>
+When we use the mean,
+    rather than the median,
+    we say the point forecasts have been bias-adjusted.
+
+To see how much difference this bias-adjustment makes,
+    consider the following **example**,
+    where we forecast average annual price of eggs
+    using the drift method
+    with a log transformation ($λ=0$). </br>
+The **log transformation** is useful in this case
+    to ensure the forecasts and the prediction intervals stay positive.
+
+```{r}
+#| label: fig-egg-price-forecast-mean-median
+#| fig-cap: "Forecasts of egg prices using the drift method applied to the logged data. The bias-adjusted mean forecasts are shown with a solid line, while the median forecasts are dashed."
+prices %>%
+  filter(!is.na(eggs)) %>%
+  model(RW(log(eggs) ~ drift())) %>%
+  forecast(h = 50) %>%
+  autoplot(prices %>% filter(!is.na(eggs)), level = 80, point_forecast = lst(mean, median))
+```
+
+Notice how the skewed forecast distribution
+    pulls up the forecast distribution's mean,
+    this is a result of the added term from the bias adjustment.
+
+Bias adjusted forecast means are automatically computed in the `fable` package
+    when using `mean()` on a distribution. </br>
+The forecast median (point forecast prior to bias adjustment) can be obtained
+    using the `median()` function on the distribution.
+
+
+## Forecasting with decomposition {#sec-forecasting-with-decomposition}
+
+Time series decomposition
+    (discussed in [Chapter 3](./chapter_3_time_series_decomposition.qmd))
+    can be a useful step in producing forecasts.
+
+Assuming an **additive decomposition**,
+    the decomposed time series can be written as
+$y_t = \hat{S_t} + \hat{A_t}$,
+where
+    $\hat{A_t} = \hat{T_t} + \hat{R_t}$ is the seasonally adjusted component. </br>
+Or, if a **multiplicative decomposition** has been used, we can write
+$y_t = \hat{S_t}\hat{A_t}$,
+where
+    $\hat{A_t} = \hat{T_t} * \hat{R_t}$
+
+To forecast a decomposed time series,
+    we forecast the seasonal component, $\hat{S_t}$, and
+    the seasonally adjusted component $\hat{A_t}$, separately. </br>
+It is usually assumed that the seasonal component is
+    unchanging, or changing extremely slowly,
+    so it is forecast by simply taking the last year of the estimated component. </br>
+In other words, a seasonal naïve method is used for the seasonal component.
+
+To forecast the seasonally adjusted component,
+    any non-seasonal forecasting method may be used. </br>
+**example**,
+    a **random walk with drift model**,
+    or **Holt's method**
+        (discussed in [Chapter 8](./chapter_8__Exponential_Smoothing.qmd)), 
+    or a **non-seasonal ARIMA model** 
+        discussed in [Chapter 9](./chapter_9__ARIMA_models.qmd)),
+    may be used.
+
+
+### Example: Employment in the US retail sector {#sec-eg-employment-us-retail-sector}
+
+```{r}
+us_retail_employment <- us_employment %>%
+  filter(year(Month) >= 1990, Title == "Retail Trade")
+
+dcmp <- us_retail_employment %>%
+  model(STL(Employed ~ trend(window = 7), robust = TRUE)) %>%
+  components() %>%
+  select(-.model)
+
+
+#| label: fig-us-retail-employment-seasonally-adjusted-forecast
+#| fig-cap: "Naïve forecasts of the seasonally adjusted data obtained from an STL decomposition of the total US retail employment."
+dcmp %>%
+  model(NAIVE(season_adjust)) %>%
+  forecast() %>%
+  autoplot(dcmp) +
+  labs(y = "New orders index",
+       title = "Naive forecasts of seasonally adjusted data")
+```
+
+shows naïve forecasts of the seasonally adjusted US retail employment data. </br>
+These are then **reseasonalised**
+    by adding in the seasonal naïve forecasts of the seasonal component.
+
+This is made easy with the
+> `decomposition_model()` function, </br>
+    allows you to compute forecasts via any additive decomposition,
+    using other model functions to forecast each of the decomposition's components. </br>
+
+Seasonal components of the model will be forecasted automatically using `SNAIVE()`
+    if a different model isn't specified. </br>
+The function will also do the reseasonalising for you, 
+    ensuring that the resulting forecasts of the original data are obtained. </br>
+shown in @fig-us-retail-employment-naïve-seasonal-naïve
+
+```{r}
+fit_dcmp <- us_retail_employment %>%
+  model(stlf = decomposition_model(
+    STL(Employed ~ trend(window = 7), robust = TRUE),
+    NAIVE(season_adjust)
+  ))
+
+
+#| label: fig-us-retail-employment-naïve-seasonal-naïve
+#| fig-cap: "Forecasts of the total US retail employment data based on a naïve forecast of the seasonally adjusted data and a seasonal naïve forecast of the seasonal component, after an STL decomposition of the data."
+fit_dcmp %>%
+  forecast() %>%
+  autoplot(us_retail_employment)
+```
+
+The prediction intervals shown in this graph
+    are constructed in the same way as the point forecasts. </br>
+That is, the upper and lower limits of the prediction intervals
+    on the seasonally adjusted data
+    are **reseasonalised**
+    by adding in the forecasts of the seasonal component.
+
+The ACF of the residuals
+    shown in @fig-us-retail-employment-naïve-seasonal-naïve-residuals,
+    display significant autocorrelations. </br>
+These are due to the naïve method
+    not capturing the changing trend in the seasonally adjusted series.
+
+```{r}
+#| label: fig-us-retail-employment-naïve-seasonal-naïve-residuals
+#| fig-cap: "Checking the residuals."
+fit_dcmp %>% gg_tsresiduals()
+```
+
+
+## Evaluating point forecast accuracy {#sec-evaluating-point-forecast-accuracy}
+
+### Training and test sets {#sec-train-test-sets}
+
+It is important to evaluate forecast accuracy using genuine forecasts. </br>
+Consequently, the size of the residuals
+    is not a reliable indication of how large
+    true forecast errors are likely to be. </br>
+The accuracy of forecasts can only be determined
+    by considering how well a model performs
+    on new data that were not used when fitting the model.
+
+When choosing models,
+    it is common practice to separate the available data into two portions,
+    training and test data, where
+
+> the **training data**
+is used to estimate any parameters of a forecasting method and  
+
+> the **test data**
+is used to evaluate its accuracy. 
+
+Because the test data is not used in determining the forecasts,
+    it should provide a reliable indication
+    of how well the model is likely to forecast on new data.
+
+The **size of the test** set is typically about 20% of the total sample,
+    although this value depends on
+    how long the sample is and 
+    how far ahead you want to forecast. </br>
+The test set **should ideally be at least as large as**
+    the maximum forecast horizon required. </br>
+The following points should be noted.
+- A model which fits the training data well will not necessarily forecast well.
+- A perfect fit can always be obtained by using a model with enough parameters.
+- Over-fitting a model to data is just as bad as
+    failing to identify a systematic pattern in the data.
+
+**Alternate names:**
+- training data / in-sample data
+- test data / out-of-sample data / hold-out data
+
+We prefer to use **training data** and **test data** in this book.
+
+
+### Functions to subset a time series {#sec-subset-time-series}
+
+> `filter()`  
+    is useful when extracting a portion of a time series, 
+        such as we need when creating training and test sets.  
+
+When splitting data into evaluation sets,
+    filtering the index of the data is particularly useful.
+```{r}
+# extracts all data from 1995 onward.
+aus_production %>%
+    filter(year(Quarter) >= 1995)
+
+# Alternate
+aus_production %>%
+    filter_index("1995 Q1" ~ .)
+```
+
+It also allows extracting all values for a specific season.
+```{r}
+# extracts the first quarters for all years.
+aus_production %>%
+    filter(quarter(Quarter) == 1)
+```
+
+> `slice()`  
+    allows the use of indices to choose a subset from each group.
+
+```{r}
+# extracts the last 20 observations (5 years).
+aus_production %>% 
+    slice(n()-19:0)
+```
+
+Slice also works with groups, 
+    making it possible to subset observations from each key.
+```{r}
+# will subset the first year of data from each time series in the data.
+aus_retail %>%
+  group_by(State, Industry) %>%
+  slice(1:12)
+```
+
+> `top_n()`  
+    is useful for extracting the most extreme observations.
+
+```{r}
+# highest closing stock price for Google, Apple, Facebook and Amazon
+gafa_stock %>%
+  group_by(Symbol) %>%
+  top_n(1, Close)
+```
+
+
+### Forecast errors {#sec-forecast-errors}
+
+> A forecast **error** </br>
+    is the difference between an observed value and its forecast.  
+
+Here **error**
+    does not mean a mistake,
+    it means the unpredictable part of an observation. </br>
+It can be written as
+$e_{T+h} = y_{T+h} - \hat{y}_{T+h|T}$,
+where
+    the training data is given by ${y_1, \dots, y_T}$ and
+    the test data is given by ${y_{T+1}, y_{T+2}, \dots}$.
+
+Note that forecast errors are different from residuals in two ways.
+
+1. First, residuals are calculated on the training set
+    while forecast errors are calculated on the test set.
+2. Second, residuals are based on one-step forecasts
+    while forecast errors can involve multi-step forecasts.
+
+We can measure forecast accuracy
+    by summarising the forecast errors in different ways.
+
+
+### Scale-dependent errors {#sec-scale-dependent-errors}
+
+forecast errors are on the same scale as the data. </br>
+Accuracy measures that are based only on $e_t$
+    are therefore scale-dependent
+    and cannot be used to make comparisons
+    between series that involve different units.
+
+The two most commonly used scale-dependent measures
+    are based on the
+    **absolute errors** or
+    **squared errors**:
+$$
+\begin{align*}
+\text{Mean absolute error: MAE} & = \text{mean}(|e_{t}|),\\
+\text{Root mean squared error: RMSE} & = \sqrt{\text{mean}(e_{t}^2)}
+\end{align*}
+$$
+
+When comparing forecast methods applied
+    to a single time series,
+    or to several time series with the same units,
+    the MAE is popular as it is easy to both understand and compute. </br>
+A forecast method that
+    minimises the **MAE**
+        will lead to forecasts of the median,
+    while minimising the **RMSE**
+        will lead to forecasts of the mean. </br>
+Consequently, the **RMSE** is also widely used,
+    despite being more difficult to interpret.
+
+
+### Percentage errors {#sec-percentage-errors}
+
+> percentage error  
+    is given by
+$p_{t} = 100 e_{t}/y_{t}$.  
+
+Percentage errors have the **advantage**
+    of being unit-free,
+    and so are frequently used to compare forecast performances between data sets. </br>
+The most commonly used measure is:
+$$
+\text{Mean absolute percentage error: MAPE} = \text{mean}(|p_{t}|)
+$$
+
+Measures based on percentage errors have the **disadvantage**
+    of being infinite or undefined if $y_t = 0$
+    for any $t$ in the period of interest,
+    and having extreme values if any $y_t$ is close to zero. </br>
+Another problem with percentage errors that is often overlooked is that
+    they assume the unit of measurement has a meaningful zero. </br>
+That is,
+    a percentage is valid on a ratio scale,
+    but not on an interval scale. </br>
+Only ratio scale variables have meaningful zeros.
+
+They also have the **disadvantage** that
+    they put a heavier penalty on negative errors
+    than on positive errors. </br>
+This observation led to the use of the so-called
+
+> **symmetric MAPE (sMAPE)**  
+It is defined by
+$$
+\text{sMAPE} = \text{mean}\left(200|y_{t} - \hat{y}_{t}|/(y_{t}+\hat{y}_{t})\right)
+$$
+
+However,
+    if $y_t$ is close to zero, 
+    $\hat{y}_t$ is also likely to be close to zero. </br>
+Thus, the measure still involves division by a number close to zero,
+    making the calculation unstable. </br>
+Also, the value of sMAPE can be negative,
+    so it is not really a measure of *absolute percentage errors* at all.
+
+*recommend* that the **sMAPE** not be used. </br>
+It is included here only because it is widely used, 
+    although we will not use it in this book.
+
+
+### Scaled errors {#sec-scaled-errors}
+
+alternative
+    to using percentage errors
+    when comparing forecast accuracy across series with different units. </br>
+They proposed
+    **scaling the errors based on the training MAE from a simple forecast method**.
+
+For a **non-seasonal time series**,
+    a useful way to define a scaled error
+    uses **naïve forecasts**:
+$$
+q_{j} = \frac{\displaystyle e_{j}}
+            {\displaystyle\frac{1}{T-1}\sum_{t=2}^T |y_{t}-y_{t-1}|}
+$$
+
+Because the numerator and denominator
+    both involve values on the scale of the original data,
+    $q_j$ is independent of the scale of the data. </br>
+A scaled error
+    is less than one
+    if it arises from a better forecast
+    than the average naïve forecast computed on the training data. </br>
+Conversely,
+    it is greater than one
+    if the forecast is worse than
+    the average naïve forecast computed on the training data.
+
+For **seasonal time series**,
+    a scaled error can be defined using **seasonal naïve forecasts**:
+$$
+q_{j} = \frac{\displaystyle e_{j}}
+            {\displaystyle\frac{1}{T-m}\sum_{t=m+1}^T |y_{t}-y_{t-m}|}
+$$
+
+The **mean absolute scaled error** is simply  
+$\text{MASE} = \text{mean}(|q_{j}|)$ </br>
+Similarly, the **root mean squared scaled error** is given by
+$\text{RMSSE} = \sqrt{\text{mean}(q_{j}^2)}$,
+where 
+$$
+q^2_{j} = \frac{\displaystyle e^2_{j}}
+                {\displaystyle\frac{1}{T-m}\sum_{t=m+1}^T (y_{t}-y_{t-m})^2},
+$$
+and we set $m=1$ for non-seasonal data.
+
+
+## Examples {#sec-examples-forecast-accuracy}
+
+```{r}
+recent_production <- aus_production %>%
+    filter(year(Quarter) >= 1992)
+
+beer_train <- recent_production %>%
+    filter(year(Quarter) <= 2007)
+
+beer_fit <- beer_train %>%
+  model(
+    Mean = MEAN(Beer),
+    `Naïve` = NAIVE(Beer),
+    `Seasonal naïve` = SNAIVE(Beer),
+    Drift = RW(Beer ~ drift())
+  )
+
+beer_fc <- beer_fit %>%
+  forecast(h = 10)
+
+
+#| label: fig-australian-beer-production-forecast-2007-end
+#| fig-cap: "Forecasts of Australian quarterly beer production using data up to the end of 2007."
+beer_fc %>%
+  autoplot(
+    aus_production %>% filter(year(Quarter) >= 1992),
+    level = NULL
+  ) +
+  labs(y = "Megalitres", title = "Forecasts for quarterly beer production") +
+  guides(colour = guide_legend(title = "Forecast"))
+
+accuracy(beer_fc, recent_production)
+```
+
+`accuracy()` function will automatically extract the relevant periods from the data
+    (`recent_production` in this example)
+    to match the forecasts when computing the various accuracy measures.
+
+It is obvious from the graph that the seasonal naïve method is best for these data,
+    although it can still be improved,
+    as we will discover later. </br>
+Sometimes, different accuracy measures will lead to different results
+    as to which forecast method is best. </br>
+However, in this case, all of the results point to the seasonal naïve method
+    as the best of these three methods for this data set.
+
+To take a **non-seasonal example**,
+    consider the Google stock price.
+```{r}
+google_fit <- google_2015 %>%
+  model(
+    Mean = MEAN(Close),
+    `Naïve` = NAIVE(Close),
+    Drift = RW(Close ~ drift())
+  )
+
+google_fc <- google_fit %>%
+  forecast(google_jan_2016)
+
+
+#| label: fig-google-stock-price-forecast-jan-2016
+#| fig-cap: "Forecasts of the Google stock price for Jan 2016."
+google_fc %>%
+  autoplot(bind_rows(google_2015, google_jan_2016), level = NULL) +
+  labs(x = "Day", y = "Closing Price (US$)",
+       title = "Google stock price (daily ending 6 Dec 13)") +
+  guides(colour = guide_legend(title = "Forecast"))
+
+accuracy(google_fc, google_stock)
+```
+
+Here, the best method is the naïve method 
+    (regardless of which accuracy measure is used).
+
+
+## Evaluating distributional forecast accuracy {#sec-evaluating-distributional-forecast-accuracy}
+
+When evaluating distributional forecasts,
+    we need to use some other measures.
+
+### Quantile scores {#sec-quantile-scores}
+
+```{r}
+#| label: fig-google-stock-price-forecast-jan-2016-prediction-intervals
+#| fig-cap: "Naïve forecasts of the Google stock price for Jan 2016, along with 80% prediction intervals."
+google_fc %>%
+  filter(.model == "Naïve") %>%
+  autoplot(bind_rows(google_2015, google_jan_2016), level = 80)
+```
+
+The lower limit of this prediction interval
+    gives the 10th percentile (or 0.1 quantile) of the forecast distribution,
+    so we would expect the actual value to lie
+    below the lower limit about 10% of the time,
+    and to lie above the lower limit about 90% of the time. </br>
+When we compare the actual value to this percentile,
+    we need to allow for the fact that it is more likely to be above than below.
+
+More generally,
+    suppose we are interested in the quantile forecast 
+    with probability $p$
+    at future time $t$,
+    and let this be denoted by $f(p,t)$. </br>
+That is, we expect the observation at time $t$
+    to be less than $f(p,t)$ with probability $p$. </br>
+**example**,
+    the 10th percentile would be $f(0.10,t)$. </br>
+If $y_t$ denotes the observation at time $t$,
+    then the Quantile Score is
+$$
+Q_{p,t} = \begin{cases}
+    2(1 - p) \big(f_{p,t} - y_{t}\big), & \text{if $y_{t} < f_{p,t}$}\\
+    2p \big(y_{t} - f_{p,t}\big), & \text{if $y_{t} \ge f_{p,t}$}
+\end{cases}
+$$
+
+This is sometimes called the
+> **pinball loss function**   
+    because a graph of it resembles the trajectory of a ball on a pinball table.
+
+The multiplier of 2 is often omitted,
+    but including it makes the interpretation a little easier. </br>
+A low value of $Q_{p,t}$ indicates a better estimate of the quantile.
+
+The quantile score can be interpreted like an absolute error. </br>
+In fact, when $p = 0.5$,
+    the quantile score $Q_{p,t}$ is the same as the absolute error. </br>
+For other values of $p$,
+    the **error** $(y_t - f_{p,t})$ is weighted
+    to take account of how likely it is be positive or negative. </br>
+If $p > 0.5$,
+    $Q_{p,t}$ gives a heavier penalty
+    when the observation is greater than the estimated quantile
+    than when the observation is less than the estimated quantile. </br>
+The reverse is true for $(p < 0.5)$.
+
+In Figure (`google_fc`),
+    the one-step-ahead 10% quantile forecast (for 4 January 2016)
+    is $f_{0.1,t} = 744.54$
+    and the observed value is $y_t = 741.84$. </br>
+Then
+    $Q_{0.1,t} = 2(1 - 0.1) (744.54 - 741.84) = 4.86$. </br>
+This is easily computed using `accuracy()` with the `quantile_score()` function:
+```{r}
+google_fc %>%
+  filter(.model == "Naïve", Date == "2016-01-04") %>%
+  accuracy(google_stock, list(qs = quantile_score), probs = 0.10)
+```
+
+
+### Winkler Score {#sec-winkler-score}
+
+It is often of interest to evaluate a prediction interval,
+    rather than a few quantiles,
+    and the **Winkler score** is designed for this purpose. </br>
+If the $100(1-\alpha)$% prediction interval at time $t$ is given by
+    $[\ell_{\alpha,t}, u_{\alpha,t}]$,
+    then the
+
+> **Winkler score**  
+    is defined as
+    the length of the interval
+    plus a penalty if the observation is outside the interval:
+$$
+W_{\alpha,t} = \begin{cases}
+    (u_{\alpha,t} - \ell_{\alpha,t}) + \frac{2}{\alpha} (\ell_{\alpha,t} - y_t) & \text{if } y_t < \ell_{\alpha,t} \\
+    (u_{\alpha,t} - \ell_{\alpha,t}) & \text{if } \ell_{\alpha,t} \le y_t \le u_{\alpha,t} \\
+    (u_{\alpha,t} - \ell_{\alpha,t}) + \frac{2}{\alpha} (y_t - u_{\alpha,t}) & \text{if } y_t > u_{\alpha,t}
+\end{cases}
+$$
+
+For observations that fall within the interval,
+    the **Winkler score** is simply the length of the interval. </br>
+So low scores are associated with narrow intervals. </br>
+However, if the observation falls outside the interval,
+    the penalty applies,
+    with the penalty proportional to
+    how far the observation is outside the interval.
+
+Prediction intervals are usually constructed from quantiles by setting
+    $\ell_{\alpha, t} = f_{\alpha/2, t}$ and
+    $u_{\alpha, t} = f_{1 - \alpha/2, t}$. </br>
+If we add the corresponding quantile scores and divide by $α$,
+    we get the **Winkler score**:
+$W_{\alpha,t} = (Q_{\alpha/2, t} + Q_{1 - \alpha/2, t}) / \alpha$
+
+The one-step-ahead 80% interval
+    shown in Figure @fig-google-stock-price-forecast-jan-2016-prediction-intervals
+    for 4 January 2016 is [744.54, 773.22],
+    and the actual value was 741.84,
+    so the Winkler score is  
+$W_{\alpha,t} = (773.22 - 744.54) + \frac{2}{0.2} (744.54 - 741.84) = 55.68$.
+
+This is easily computed using `accuracy()` with the `winkler_score()` function:
+```{r}
+google_fc %>%
+  filter(.model == "Naïve", Date == "2016-01-04") %>%
+  accuracy(google_stock, list(winkler = winkler_score), level = 80)
+```
+
+
+### Continuous Ranked Probability Score {#sec-continuous-ranked-probability-score}
+
+Often we are interested in the whole forecasting distribution,
+    rather than particular quantiles or prediction intervals. </br>
+In that case, we can average the quantile scores over all values of $p$
+    to obtain the **Continuous Ranked Probability Score or CRPS**
+
+In the Google stock price **example**,
+    we can compute the average CRPS value for all days in the test set. </br>
+A **CRPS** value
+    is a little like a weighted absolute error
+    computed from the entire forecast distribution,
+    where the weighting takes account of the probabilities.
+
+```{r}
+google_fc %>%
+  accuracy(google_stock, list(crps = CRPS))
+```
+Here, the Naïve method is giving better distributional forecasts
+    than the Drift or Mean methods.
+
+
+### Scale-free comparisons using skill scores {#sec-scale-free-comparisons-using-skill-scores}
+
+As with point forecasts,
+    it is useful to be able to compare
+    the distributional forecast accuracy of several methods
+    across series on different scales. </br>
+For point forecasts,
+    we used scaled errors for that purpose. </br>
+Another approach is to use **skill scores**. </br>
+These can be used for both
+    point forecast accuracy and
+    distributional forecast accuracy.
+
+With **skill scores**,
+    we compute a forecast accuracy measure
+    relative to some benchmark method. </br>
+**example**,
+    if we use the Naïve method as a benchmark,
+    and also compute forecasts using the Drift method,
+    we can compute the **CRPS skill score** of the Drift method
+    relative to the Naïve method as
+$$
+\frac
+    {\text{CRPS}_{\text{Naïve}} - \text{CRPS}_{\text{Drift}}}
+    {\text{CRPS}_{\text{Naïve}}}
+$$
+
+This gives the proportion that the Drift method improves
+    over the Naïve method based on CRPS.
+
+It is easy to compute using the `accuracy()` function.
+```{r}
+google_fc %>%
+  accuracy(
+    google_stock %>% filter(year(Date) >= 2015),
+    list(skill = skill_score(CRPS))
+  )
+```
+
+Of course, the skill score for Naïve is 0 because it can't improve on itself. </br>
+The other two methods have larger CRPS values than Naïve,
+    so the skills scores are negative;
+    the Drift method is 26.6% worse than the Naïve method.
+
+When the data are seasonal,
+    `skill_score()` will use a Seasonal Naïve benchmark method
+    rather than the Naïve benchmark. </br>
+This will work even when the benchmark forecast is not included in the `fable` object
+    as `skill_score()` computes the benchmark forecasts that are needed. </br>
+It is important that the data provided to `accuracy()`
+    include only the training and test data
+    to ensure the same training data are used for the benchmark forecasts. </br>
+If we had not filtered the `google_stock` data to remove data prior to 2015,
+    the benchmark **CRPS** would have used all available data,
+    and then the skill value for Naïve would not have been 0
+    as the **CRPS** values would have been computed on two different training sets.
+
+The `skill_score()` function can be used with any accuracy measure.  
+**example**,
+    `skill_score(MSE)` provides a way of comparing
+    MSE values across diverse series. </br>
+However, it is important that the test set is large enough
+    to allow reliable calculation of the error measure,
+    especially in the denominator. </br>
+For that reason, **MASE** or **RMSSE** are often preferable scale-free measures
+    for point forecast accuracy.
+
+
+## Time series cross-validation {#sec-time-series-cross-validation}
+
+A more sophisticated version of training/test sets
+    is **time series cross-validation**. </br>
+In this procedure, there are a series of test sets,
+    each consisting of a single observation. </br>
+The corresponding training set consists only of observations
+    that occurred prior to the observation that forms the test set. </br>
+Thus, no future observations can be used in constructing the forecast. </br>
+Since it is not possible to obtain a reliable forecast based on a small training set,
+    the earliest observations are not considered as test sets.
+
+The forecast accuracy is computed by averaging over the test sets. </br>
+This procedure is sometimes known as
+    **evaluation on a rolling forecasting origin**
+    because the **origin** at which the forecast is based rolls forward in time.
+
+With time series forecasting,
+    one-step forecasts may not be as relevant as multi-step forecasts. </br>
+In this case, the cross-validation procedure based on a rolling forecasting origin
+    can be modified to allow multi-step errors to be used.
+
+In the following **example**, 
+    we compare the accuracy obtained via time series cross-validation
+    with the residual accuracy. </br>
+`stretch_tsibble()` function is used to create many training sets. </br>
+start with a training set of length `.init=3`,
+    and increase the size of successive training sets by `.step=1`. </br>
+`.id` column provides a new key indicating the various training sets.
+```{r}
+# Time series cross-validation accuracy
+google_2015_tr <- google_2015 %>%
+  slice(1:(n()-1)) %>%
+  stretch_tsibble(.init = 3, .step = 1)
+
+# TSCV accuracy
+fc <- google_2015_tr %>%
+  model(RW(Close ~ drift())) %>%
+  forecast(h = 1)
+fc %>% accuracy(google_2015)
+
+# Residual accuracy / Training set accuracy
+google_2015 %>%
+  model(RW(Close ~ drift())) %>%
+  accuracy()
+```
+
+As expected, the accuracy measures from the residuals are smaller,
+    as the corresponding "forecasts" are based on
+    a model fitted to the entire data set,
+    rather than being true forecasts.
+
+A good way to choose the best forecasting model
+    is to find the model with the smallest RMSE computed
+    using time series cross-validation.
+
+
+### Example: Forecast horizon accuracy with cross-validation {#sec-eg-forecast-horizon-accuracy-cross-validation}
+
+The code below evaluates the forecasting performance
+    of 1- to 8-step-ahead drift forecasts. </br>
+The plot shows that the forecast error increases
+    as the forecast horizon increases,
+    as we would expect.
+```{r}
+google_2015_tr <- google_2015 %>%
+  slice(1:(n()-8)) %>%
+  stretch_tsibble(.init = 3, .step = 1)
+
+fc <- google_2015_tr %>%
+  model(RW(Close ~ drift())) %>%
+  forecast(h = 8) %>%
+  group_by(.id) %>%
+  mutate(h = row_number()) %>%
+  ungroup()
+
+
+#| label: fig-google-closing-stock-prices-rmse
+#| fig-cap: "RMSE as a function of forecast horizon for the drift method applied to Google closing stock prices. "
+fc %>%
+  accuracy(google_2015, by = c("h", ".model")) %>%
+  ggplot(aes(x = h, y = RMSE)) +
+  geom_point()
+```
+
+
+## Exercises
+
+
+## Future Reading

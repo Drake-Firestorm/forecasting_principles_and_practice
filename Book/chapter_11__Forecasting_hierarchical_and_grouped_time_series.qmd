@@ -1,0 +1,1639 @@
+---
+title: "Forecasting hierarchical and grouped time series"
+format:
+  html:
+    code-fold: true
+number-sections: true
+---
+
+Time series can often be naturally disaggregated by various attributes of interest. </br>
+**example**,
+    the total number of bicycles sold by a cycling manufacturer
+    can be disaggregated by product type
+    such as road bikes, mountain bikes and hybrids. </br>
+Each of these can be disaggregated into finer categories. </br>
+**example**
+    hybrid bikes can be divided into
+    city, commuting, comfort, and trekking bikes; and so on. </br>
+These categories are nested within the larger group categories,
+    and so the collection of time series
+    follows a hierarchical aggregation structure. </br>
+Therefore we refer to these as **hierarchical time series**.
+
+Hierarchical time series often arise due to geographic divisions. </br>
+**example**,
+    the total bicycle sales can be disaggregated by country,
+    then within each country by state,
+    within each state by region,
+    and so on down to the outlet level.
+
+Alternative aggregation structures arise
+    when attributes of interest are crossed rather than nested. </br>
+**example**,
+    the bicycle manufacturer may be interested in attributes
+    such as frame size, gender, price range, etc. </br>
+Such attributes do not naturally disaggregate in a unique hierarchical manner
+    as the attributes are not nested. </br>
+We refer to the resulting time series of crossed attributes as
+    **grouped time series**.
+
+More complex structures arise
+    when attributes of interest are both nested and crossed. </br>
+**example**,
+    it would be natural for the bicycle manufacturer to be interested in
+    sales by product type and also by geographic division. </br>
+Then both the product groupings and the geographic hierarchy are mixed together. </br>
+We introduce alternative aggregation structures in
+    @sec-hierarchical-grouped-time-series.
+
+Forecasts are often required for all disaggregate and aggregate series,
+    and it is natural to want the forecasts to add up
+    in the same way as the data. </br>
+**example**,
+    forecasts of regional sales should add up to forecasts of state sales,
+    which should in turn add up to give a forecast for national sales.
+
+In this chapter we discuss forecasting large collections of time series
+    that aggregate in some way. </br>
+The challenge is that we require forecasts
+    that are coherent across the entire aggregation structure. </br>
+That is, we require forecasts to add up in a manner
+    that is consistent with the aggregation structure of
+    the hierarchy or group that defines the collection of time series.
+
+
+## Hierarchical and grouped time series {#sec-hierarchical-grouped-time-series}
+
+### Hierarchical time series {#sec-hierarchical-time-series}
+
+@fig-hierarchical-tree-diagram shows a simple hierarchical structure. </br>
+At the top of the hierarchy is the “Total,”
+    the most aggregate level of the data. </br>
+The $t$ th observation of the Total series
+    is denoted by $y_t$ for $t=1, \dots, T$. </br>
+The Total is disaggregated into two series,
+    which in turn are divided into three and two series respectively
+    at the bottom level of the hierarchy. </br>
+Below the top level, we use $y_{j,t}$
+    to denote the $t$ th observation of the series corresponding to node $j.$ </br>
+**example**,
+    $y_{A,t}$ denotes
+        the $t$ th observation of the series corresponding to node A,
+    $y_{AB,t}$ denotes
+        the $t$ th observation of the series corresponding to node AB, and so on.
+
+```{mermaid}
+%%| label: fig-hierarchical-tree-diagram
+%%| fig-cap: "A two level hierarchical tree diagram."
+flowchart TD
+    Total((Total)) --- A((A))
+    Total((Total)) --- B((B))
+    A((A)) --- AA((AA))
+    A((A)) --- AB((AB))
+    A((A)) --- AC((AC))
+    B((B)) --- BA((BA))
+    B((B)) --- BB((BB))
+
+    style Total fill:lightviolet
+    style A fill:lightgreen
+    style AA fill:lightgreen
+    style AB fill:lightgreen
+    style AC fill:lightgreen
+    style B fill:lightblue
+    style BA fill:lightblue
+    style BB fill:lightblue
+```
+
+In this small example,
+    the total number of series in the hierarchy is $n=1+2+5=8$,
+    while the number of series at the bottom level is $m=5$. </br>
+Note that $n>m$ in all hierarchies.
+
+For any time $t$,
+    the observations at the bottom level of the hierarchy
+    will sum to the observations of the series above. </br>
+**example**,
+$$
+    y_{t}=y_{AA,t} + y_{AB,t} + y_{AC,t} + y_{BA,t} + y_{BB,t}
+$$ {#eq-total-toplevel}
+$$
+    y_{A,t} = y_{AA,t} + y_{AB,t} + y_{AC,t}
+    \qquad \text{and} \qquad
+    y_{B,t} = y_{BA,t} + y_{BB,t}. 
+$$ {#eq-total-middlelevel}
+
+Substituting @eq-total-middlelevel into @eq-total-toplevel, we also get
+    $y_t = y_{A,t} + y_{B,t}$.
+
+
+### Example: Australian tourism hierarchy {#sec-australian-tourism-hierarchy}
+
+Australia is divided into six states and two territories,
+    with each one having its own government
+    and some economic and administrative autonomy. </br>
+For simplicity, we refer to both states and territories as “states.” </br>
+Each of these states can be further subdivided into regions as shown in
+    ![Australian states and tourism regions.](./australia_map.png) and
+    @tbl-australian-tourism-regions. </br>
+In total there are 76 such regions. </br>
+Business planners and tourism authorities
+    are interested in forecasts for the whole of Australia,
+    for each of the states and territories,
+    and also for the regions.
+
+| State | Region |
+| :---- | :----- |
+| Australian Capital Territory | Canberra |
+| New South Wales | Blue Mountains, Capital Country, Central Coast, Central NSW, Hunter, New England North West, North Coast NSW, Outback NSW, Riverina, Snowy Mountains, South Coast, Sydney, The Murray. |
+| Northern Territory | Alice Springs, Barkly, Darwin, Kakadu Arnhem, Katherine Daly, Lasseter, MacDonnell. |
+| Queensland | Brisbane, Bundaberg, Central Queensland, Darling Downs, Fraser Coast, Gold Coast, Mackay, Northern Outback, Sunshine Coast, Tropical North Queensland, Whitsundays. |
+| South Australia | Adelaide, Adelaide Hills, Barossa, Clare Valley, Eyre Peninsula, Fleurieu Peninsula, Flinders Ranges and Outback, Kangaroo Island, Limestone Coast, Murraylands, Riverland, Yorke Peninsula. |
+| Tasmania | East Coast, Hobart and the South, Launceston Tamar and the North, North West, Wilderness West. |
+| Victoria | Ballarat, Bendigo Loddon, Central Highlands, Central Murray, Geelong and the Bellarine, Gippsland, Goulburn, Great Ocean Road, High Country, Lakes, Macedon, Mallee, Melbourne, Melbourne East, Murray East, Peninsula, Phillip Island, Spa Country, Upper Yarra, Western Grampians, Wimmera. |
+| Western Australia | Australia’s Coral Coast, Australia’s Golden Outback, Australia’s North West, Australia’s South West, Experience Perth. |
+
+: Australian tourism regions. {#tbl-australian-tourism-regions}
+
+
+The `tourism` tsibble contains data on quarterly domestic tourism demand,
+    measured as the number of overnight trips Australians spend away from home. </br>
+The key variables `State` and `Region` denote the geographical areas,
+    while a further key `Purpose` describes the purpose of travel. </br>
+For now, we will ignore the purpose of travel
+    and just consider the geographic hierarchy. </br>
+To make the graphs and tables simpler,
+    we will recode `State` to use abbreviations.
+```{r}
+tourism <- tsibble::tourism %>%
+  mutate(State = recode(State,
+    `New South Wales` = "NSW",
+    `Northern Territory` = "NT",
+    `Queensland` = "QLD",
+    `South Australia` = "SA",
+    `Tasmania` = "TAS",
+    `Victoria` = "VIC",
+    `Western Australia` = "WA"
+    )
+  )
+```
+
+Using the `aggregate_key()` function,
+    we can create the hierarchical time series
+    with overnight trips in regions at the bottom level of the hierarchy,
+    aggregated to states,
+    which are aggregated to the national total. </br>
+A hierarchical time series corresponding to the nested structure is created
+    using a `parent/child` specification.
+```{r}
+tourism_hts <- tourism %>%
+  aggregate_key(State / Region, Trips = sum(Trips))
+```
+
+The new tsibble now has some additional rows
+    corresponding to state and national aggregations for each quarter. </br>
+@fig-domestic-trips-by-state shows the aggregate total overnight trips
+    for the whole of Australia as well as the states,
+    revealing diverse and rich dynamics. </br>
+**example**,
+    there is noticeable national growth since 2010 and for some states such as
+        the ACT, New South Wales, Queensland, South Australia, and Victoria. </br>
+    There seems to be a significant jump for Western Australia in 2014.
+```{r}
+#| label: fig-domestic-trips-by-state
+#| fig-cap: "Domestic overnight trips from 1998 Q1 to 2017 Q4 aggregated by state."
+tourism_hts %>%
+  filter(is_aggregated(Region)) %>%
+  autoplot(Trips) +
+  labs(y = "Trips ('000)", title = "Australian tourism: national and states") +
+  facet_wrap(vars(State), scales = "free_y", ncol = 3) +
+  theme(legend.position = "none")
+
+
+#| label: fig-domestic-trips-by-state-seasonal-plots
+#| fig-cap: "Seasonal plots for overnight trips for Queensland and the Northern Territory, and Victoria and Tasmania highlighting the contrast in seasonal patterns between northern and southern states in Australia."
+tourism %>%
+  filter(State %in% c("QLD", "NT", "VIC", "TAS")) %>%
+  mutate(State = fct_relevel(factor(State), c("QLD", "VIC", "NT", "TAS"))) %>%
+  group_by(State) %>%
+  summarise(Trips = sum(Trips)) %>%
+  gg_season(Trips) +
+  facet_wrap(vars(State), scales = "free_y")
+# filter %in% not working with aggregated data.
+```
+
+The seasonal pattern of the northern states,
+    such as Queensland and the Northern Territory,
+    leads to peak visits in winter (corresponding to Q3)
+    due to the tropical climate and rainy summer months. </br>
+In contrast, the southern states tend to peak in summer (corresponding to Q1). </br>
+This is highlighted in the seasonal plots shown in
+    @fig-domestic-trips-by-state-seasonal-plots
+    for Queensland and the Northern Territory
+        (shown in the left column)
+    versus the most southern states of Victoria and Tasmania
+        (shown in the right column).
+
+```{r}
+#| label: fig-domestic-trips-by-region
+#| fig-cap: "Domestic overnight trips from 1998 Q1 to 2017 Q4 for some selected regions."
+tourism_hts %>%
+  filter(!is_aggregated(Region)) %>%
+  autoplot(Trips) +
+  labs(y = "Trips ('000)", title = "Australian tourism: by regions nested within states") +
+  facet_wrap(vars(State), scales = "free_y", ncol = 3) +
+  theme(legend.position = "none")
+```
+
+The plots in @fig-domestic-trips-by-region
+    shows data for some selected regions. </br>
+These help us visualise the diverse regional dynamics within each state,
+    with some series showing strong trends or seasonality,
+    some showing contrasting seasonality,
+    while some series appear to be just noise.
+
+
+### Grouped time series {#sec-grouped-time-series}
+
+With grouped time series,
+    the data structure does not naturally disaggregate
+    in a unique hierarchical manner. </br>
+@fig-group-tree
+    shows a simple grouped structure. </br>
+At the top of the grouped structure is the Total,
+    the most aggregate level of the data,
+    again represented by $y_t$. </br>
+The Total can be disaggregated
+    by attributes (A, B) forming series $y_{A,t}$ and $y_{B,t}$,
+    or by attributes (X, Y) forming series $y_{X,t}$ and $y_{Y,t}$. </br>
+At the bottom level,
+    the data are disaggregated by both attributes.
+
+```{mermaid}
+%%| label: fig-group-tree
+%%| fig-cap: "Alternative representations of a two level grouped structure."
+flowchart TD
+    %% Left graph
+    Total((Total)) --- A((A))
+    Total((Total)) --- B((B))
+    A((A)) --- AX((AX))
+    A((A)) --- AY((AY))
+    B((B)) --- BX((BX))
+    B((B)) --- BY((BY))
+
+    style Total fill:lightviolet
+    style A fill:lightgreen
+    style AX fill:lightgreen
+    style AY fill:lightgreen
+    style B fill:lightblue
+    style BX fill:lightblue
+    style BY fill:lightblue
+
+    %% Right graph
+    Total2((Total)) --- X((X))
+    Total2((Total)) --- Y((Y))
+    X((X)) --- AX2((AX))
+    X((X)) --- BX2((BX))
+    Y((Y)) --- AY2((AY))
+    Y((Y)) --- BY2((BY))
+
+    style Total fill:lightviolet
+    style X fill:lightgreen
+    style AX2 fill:lightgreen
+    style BX2 fill:lightgreen
+    style Y fill:lightblue
+    style AY2 fill:lightblue
+    style BY2 fill:lightblue
+```
+
+This example shows that
+    there are alternative aggregation paths for grouped structures. </br>
+For any time $t$, as with the hierarchical structure,
+    $y_{t}=y_{AX,t} + y_{AY,t} + y_{BX,t} + y_{BY,t}.$ </br>
+However, for the first level of the grouped structure,
+$$
+    y_{A,t} = y_{AX,t} + y_{AY,t}
+    \qquad \qquad
+    y_{B,t} = y_{BX,t} + y_{BY,t}
+$$ {#eq-total-middlelevel-AB}
+but also
+$$
+    y_{X,t} = y_{AX,t} + y_{BX,t}
+    \qquad \qquad
+    y_{Y,t} = y_{AY,t} + y_{BY,t}.
+$$ {#eq-total-middlelevel-XY}
+
+Grouped time series can sometimes be thought of as
+    hierarchical time series that do not impose a unique hierarchical structure,
+    in the sense that the order by which the series can be grouped is not unique.
+
+
+### Example: Australian prison population {#sec-australian-prison-population}
+
+In this example we consider the Australia prison population data
+    introduced in [Chapter 2](./chapter_2__time_series_graphics.qmd). </br>
+The top panel in @fig-prison-population-breakdown
+    shows the total number of prisoners in Australia
+    over the period 2005Q1–2016Q4. </br>
+This represents the top-level series in the grouping structure. </br>
+The panels below show the prison population disaggregated or grouped by
+    (a) state
+    (b) legal status
+        (whether prisoners have already been sentenced
+        or are in remand waiting for a sentence), and
+    (c) gender. </br>
+The three factors are crossed,
+    but none are nested within the others.
+```{r}
+#| label: fig-prison-population-breakdown
+#| fig-cap: "Total Australian quarterly adult prison population, disaggregated by state, by legal status, and by gender."
+p1 <- prison_gts %>%
+  filter(is_aggregated(Gender), is_aggregated(Legal), is_aggregated(State)) %>%
+  autoplot(Count) +
+  labs(y = "Number of prisoners ('000)", title = "Prison population: Total")
+
+p2 <- prison_gts %>%
+  filter(is_aggregated(Gender) + is_aggregated(Legal) + is_aggregated(State) == 2) %>%
+  as_tibble() %>%
+  pivot_longer(cols = !c(Quarter, Count)) %>%
+  filter(!is_aggregated(value)) %>%
+  mutate(value = fct_relevel(factor(value), c("Female", "Male", "Remanded", "Sentenced"))) %>%
+  as_tsibble(index = Quarter, key = c(name, value)) %>%
+  autoplot(Count) +
+  facet_wrap(vars(name), scales = "free_y") +
+  labs(x = "Quarter", y = "Number of prisoners ('000)") +
+  guides(color = guide_legend(title = "Series"))
+
+(p1 / p2) +
+  plot_layout(guides = "collect")
+```
+
+The following code, introduced in @sec-tsibble-objects (Chapter 2),
+    builds a tsibble object for the prison data.
+```{r}
+prison <- readr::read_csv("https://OTexts.com/fpp3/extrafiles/prison_population.csv") %>%
+  mutate(Quarter = yearquarter(Date)) %>%
+  select(-Date)  %>%
+  as_tsibble(key = c(Gender, Legal, State, Indigenous), index = Quarter) %>%
+  relocate(Quarter)
+```
+
+We create a grouped time series using `aggregate_key()`
+    with attributes or groupings of interest now being crossed
+    using the syntax `attribute1*attribute2`
+    (in contrast to the `parent/child` syntax
+    used for hierarchical time series). </br>
+The following code builds a grouped tsibble for the prison data
+    with crossed attributes: `gender`, `legal status` and `state`.
+```{r}
+prison_gts <- prison %>%
+  aggregate_key(Gender * Legal * State, Count = sum(Count)/1e3)
+```
+
+Using `is_aggregated()` within `filter()`
+    is helpful for exploring or plotting the main groups shown in
+    the bottom panels of @fig-prison-population-breakdown. </br>
+**example**,
+    the following code plots the total numbers of
+    female and male prisoners across Australia.
+```{r}
+#| label: fig-prison-population-breakdown-gender
+#| fig-cap: "Australian adult prison population disaggregated by pairs of attributes."
+prison_gts %>%
+  filter(!is_aggregated(Gender), is_aggregated(Legal), is_aggregated(State)) %>%
+  autoplot(Count) +
+  labs(y = "Number of prisoners ('000)")
+```
+
+Plots of other group combinations can be obtained in a similar way. </br>
+@fig-prison-population-breakdown
+    shows the Australian prison population grouped by all possible combinations
+    of two attributes at a time:
+    `state` and `gender`,
+    `state` and `legal status`, and
+    `legal status` and `gender`. </br>
+The following code will reproduce the first plot in
+    @fig-prison-population-breakdown-pairs.
+```{r}
+#| label: fig-prison-population-breakdown-pairs
+#| fig-cap: "Australian adult prison population disaggregated by pairs of attributes."
+p1 <- prison_gts %>%
+  filter(!is_aggregated(Gender), !is_aggregated(Legal), !is_aggregated(State)) %>%
+  mutate(Gender = as.character(Gender)) %>%
+  ggplot(aes(x = Quarter, y = Count, group = Gender, colour = Gender)) +
+  stat_summary(fun = sum, geom = "line") +
+  labs(title = "Prison population by state and gender", y = "Number of prisoners ('000)") +
+  facet_wrap(~ as.character(State), nrow = 1, scales = "free_y") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+p2 <- prison_gts %>%
+  filter(!is_aggregated(Gender), !is_aggregated(Legal), !is_aggregated(State)) %>%
+  mutate(`Legal status` = as.character(Legal)) %>%
+  ggplot(aes(x = Quarter, y = Count, colour = `Legal status`)) +
+  stat_summary(fun = sum, geom = "line") +
+  labs(title = "Prison population by state and legal status", y = "Number of prisoners ('000)") +
+  scale_color_manual(values = c("Remanded" = "purple", "Sentenced" = "orange")) +
+  facet_wrap(~ as.character(State), nrow = 1, scales = "free_y") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+p3 <- prison_gts %>%
+  filter(!is_aggregated(Gender), !is_aggregated(Legal), is_aggregated(State)) %>%
+  mutate(Gender = as.character(Gender)) %>%
+  ggplot(aes(x = Quarter, y = Count, group = Gender, colour = Gender)) +
+  stat_summary(fun = sum, geom = "line") +
+  facet_wrap(~ as.character(Legal), nrow = 1, scales = "free_y") +
+  labs(title = "Prison population by legal status and gender", x = "Quarter") +
+  theme(legend.position = "none")
+
+p1 / p2 / p3
+```
+
+@fig-prison-population-breakdown-bottom
+    shows the Australian adult prison population disaggregated
+    by all three attributes: `state`, `legal status` and `gender`. </br>
+These form the bottom-level series of the grouped structure.
+```{r}
+#| label: fig-prison-population-breakdown-bottom
+#| fig-cap: "Bottom-level time series for the Australian adult prison population, grouped by state, legal status and gender."
+prison_gts %>%
+  filter(!is_aggregated(Gender), !is_aggregated(Legal), !is_aggregated(State)) %>%
+  mutate(
+    Gender = as.character(Gender),
+    Legal = as.character(Legal),
+    State = as.character(State)
+  ) %>%
+  ggplot(aes(x = Quarter, y = Count, colour = interaction(Legal, Gender, sep = " / "))) +
+  stat_summary(fun = sum, geom = "line") +
+  facet_wrap(vars(State), scales = "free_y", nrow = 1) +
+  labs(
+    x = "Quarter", y  = "Number of prisoners ('000)"
+    , title = "Australian prison population: bottom-level series"
+    , color = "Legal status & Gender"
+  )
+```
+
+
+### Mixed hierarchical and grouped structure
+
+Often disaggregating factors are both nested and crossed. </br>
+**example**,
+    the Australian tourism data can also be disaggregated
+    by the four purposes of travel:
+    `holiday`, `business`, `visiting friends and relatives`, and `other`. </br>
+This grouping variable does not nest within any of the geographical variables. </br>
+In fact, we could consider overnight trips split by purpose of travel
+    for the whole of Australia, and for each state, and for each region. </br>
+We describe such a structure as
+    a “nested” geographic hierarchy “crossed” with the purpose of travel. </br>
+Using `aggregate_key()` this can be specified by simply combining the factors.
+```{r}
+tourism_full <- tourism %>%
+  aggregate_key((State/Region) * Purpose, Trips = sum(Trips))
+```
+
+The `tourism_full` tsibble contains 425 series,
+    including the 85 series from the hierarchical structure,
+    as well as another 340 series obtained
+    when each series of the hierarchical structure
+    is crossed with the purpose of travel.
+```{r}
+#| label: fig-domestic-trips-by-purpose
+#| fig-cap: "Australian domestic overnight trips from 1998 Q1 to 2017 Q4 disaggregated by purpose of travel. "
+tourism_full %>%
+  filter(!is_aggregated(Purpose), is_aggregated(State), is_aggregated(Region)) %>%
+  mutate(Purpose = as.character(Purpose)) %>%
+  ggplot(aes(x = Quarter, y = Trips, color = Purpose)) +
+  geom_line() +
+  facet_wrap(vars(Purpose), scales = "free_y") +
+  labs(
+    x = "Quarter", y = "Trips ('000)"
+    , title = "Australian tourism: by purpose of travel"
+  )
+
+
+#| label: fig-domestic-trips-by-state-purpose
+#| fig-cap: "Australian domestic overnight trips over the period 1998 Q1 to 2017 Q4 disaggregated by purpose of travel and by state."
+tourism_full %>%
+  filter(!is_aggregated(Purpose), !is_aggregated(State), is_aggregated(Region)) %>%
+  mutate(
+    Purpose = as.character(Purpose),
+    State = as.character(State),
+    State = recode(State,
+                   `New South Wales` = "NSW",
+                   `Northern Territory` = "NT",
+                   `Queensland` = "QLD",
+                   `South Australia` = "SA",
+                   `Tasmania` = "TAS",
+                   `Victoria` = "VIC",
+                   `Western Australia` = "WA"
+    )
+  ) %>%
+  ggplot(aes(x = Quarter, y = Trips, color = Purpose)) +
+  geom_line() +
+  facet_wrap(vars(State), scales = "free_y", nrow = 2) +
+  labs(
+    x = "Quarter", y = "Trips ('000)"
+    , title = "Australian tourism: by purpose of travel and state"
+  )
+```
+
+@fig-domestic-trips-by-purpose and @fig-domestic-trips-by-state-purpose
+    show the aggregate series grouped by purpose of travel,
+    and the series grouped by purpose of travel and state,
+    revealing further rich and diverse dynamics across these series.
+
+
+## Single level approaches {#sec-single-level-approaches}
+
+Traditionally, forecasts of hierarchical or grouped time series
+    involved selecting one level of aggregation
+    and generating forecasts for that level. </br>
+These are then either
+    aggregated for higher levels,
+    or disaggregated for lower levels,
+    to obtain a set of coherent forecasts for the rest of the structure.
+
+
+### The bottom-up approach {#sec-bottom-up-approach}
+
+A simple method for generating coherent forecasts is the “bottom-up” approach. </br>
+This approach involves
+    first generating forecasts for each series at the bottom level,
+    and then summing these to produce forecasts for all the series in the structure.
+
+**example**,
+    for the hierarchy of @fig-hierarchical-tree-diagram,
+    we first generate $h$-step-ahead forecasts for each of the bottom-level series:
+    $\hat{y}_{AA,h},~~\hat{y}_{AB,h},~~\hat{y}_{AC,h},~~ \hat{y}_{BA,h}~~\text{and}~~\hat{y}_{BB,h}.$
+    (We have simplified the previously used notation of $\hat{y}_{T+h|T}$ for brevity.)
+    ((Book used $\\yhat{AA}{h}$, without the first \, but it kept giving parse error.
+    So replaced it with $\hat{y}_{AA,h}$))
+
+Summing these, we get $h$-step-ahead coherent forecasts for the rest of the series:
+$$
+\begin{align*}
+    \tilde{y}_{h} & =
+        \hat{y}_{AA,h} + \hat{y}_{AB,h} + \hat{y}_{AC,h}
+        + \hat{y}_{BA,h} + \hat{y}_{BB,h}, \\
+    \tilde{y}_{A,h} & =
+        \hat{y}_{AA,h} + \hat{y}_{AB,h} + \hat{y}_{AC,h}, \\
+    \text{and} \quad
+    \tilde{y}_{B,h} &=
+        \hat{y}_{BA,h} + \hat{y}_{BB,h}.
+\end{align*}
+$$
+(In this chapter, we will use the “tilde” notation to indicate coherent forecasts.)
+
+An advantage of this approach is that
+    we are forecasting at the bottom level of a structure,
+    and therefore no information is lost due to aggregation. </br>
+On the other hand,
+    bottom-level data can be quite noisy
+    and more challenging to model and forecast.
+
+
+### Example: Generating bottom-up forecasts {#sec-generating-bottom-up-forecasts}
+
+Suppose we want national and state forecasts for the Australian tourism data,
+    but we aren’t interested in disaggregations
+    using regions or the purpose of travel. </br>
+So we first create a simple tsibble object
+    containing only state and national trip totals for each quarter.
+```{r}
+tourism_states <- tourism %>%
+  aggregate_key(State, Trips = sum(Trips))
+```
+
+We could generate the bottom-level state forecasts first,
+    and then sum them to obtain the national forecasts.
+```{r}
+fcasts_state <- tourism_states %>%
+  filter(!is_aggregated(State)) %>%
+  model(ets = ETS(Trips)) %>%
+  forecast()
+```
+
+Sum bottom-level forecasts to get top-level forecasts
+```{r}
+fcasts_national <- fcasts_state %>%
+  summarise(value = sum(Trips), .mean = mean(value))
+```
+
+However, we want a more general approach
+    that will work with all the forecasting methods discussed in this chapter. </br>
+So we will use the `reconcile()` function
+    to specify how we want to compute coherent forecasts.
+```{r}
+tourism_states %>%
+  model(ets = ETS(Trips)) %>%
+  reconcile(bu = bottom_up(ets)) %>%
+  forecast()
+```
+
+The `reconcile()` step has created a new “model”
+    to produce bottom-up forecasts. </br>
+The fable object contains the `ets` forecasts
+    as well as the coherent `bu` forecasts,
+    for the 8 states and the national aggregate. </br>
+At the state level, these forecasts are identical,
+    but the national `ets` forecasts will be different
+    from the national `bu` forecasts.
+
+For bottom-up forecasting, this is rather inefficient
+    as we are not interested in the ETS model for the national total,
+    and the resulting fable contains a lot of duplicates. </br>
+But later we will introduce more advanced methods
+    where we will need models for all levels of aggregation,
+    and where the coherent forecasts are different
+    from any of the original forecasts.
+
+
+### Workflow for forecasting aggregation structures {#sec-workflow-forecasting-aggregation-structures}
+
+The above code illustrates the general workflow
+    for hierarchical and grouped forecasts. </br>
+We use the following pipeline of functions.
+```{r} 
+data %>%
+    aggregate_key() %>%
+    model() %>%
+    reconcile() %>%
+    forecast()
+```
+
+1. Begin with a `tsibble` object (here labelled `data`)
+    containing the individual bottom-level series. </br>
+2. Define in `aggregate_key()` the aggregation structure
+    and build a `tsibble` object that also contains the aggregate series. </br>
+3. Identify a `model()` for each series, at all levels of aggregation. </br>
+4. Specify in `reconcile()`
+    how the coherent forecasts are to be generated from the selected models. </br>
+5. Use the `forecast()` function
+    to generate forecasts for the whole aggregation structure.
+
+
+### Top-down approaches {#sec-top-down-approaches}
+
+Top-down approaches involve
+    first generating forecasts for the Total series $y_t$,
+    and then disaggregating these down the hierarchy.
+
+Let $p_1,\dots,p_m$ denote a set of disaggregation proportions
+    which determine how the forecasts of the Total series are to be distributed
+    to obtain forecasts for each series at the bottom level of the structure. </br>
+**example**,
+    for the hierarchy of @fig-hierarchical-tree-diagram,
+    using proportions $p_1,\dots,p_5$ we get
+$$
+\tilde{y}_{AA,t} = p_1 \hat{y}_t
+, ~~~\tilde{y}_{AB,t} = p_2 \hat{y}_t
+, ~~~\tilde{y}_{AC,t} = p_3 \hat{y}_t
+, ~~~\tilde{y}_{BA,t} = p_4 \hat{y}_t
+~~~\text{and}~~~~~~
+\tilde{y}_{BB,t} = p_5 \hat{y}_t. 
+$$
+
+
+Once the bottom-level $h$-step-ahead forecasts have been generated,
+    these are aggregated to generate coherent forecasts for the rest of the series.
+
+Top-down forecasts can be generated using
+    `top_down()` within the `reconcile()` function.
+
+There are several possible top-down methods that can be specified. </br>
+The two most common top-down approaches
+    specify disaggregation proportions
+    based on the historical proportions of the data.
+
+
+### Average historical proportions {#sec-average-historical-proportions}
+
+$p_j = \frac{1}{T} \sum_{t=1}^{T}\frac{y_{j,t}}{{y_t}} ~~~~$
+    for $j=1,\dots,m$. </br> 
+Each proportion $p_j$
+    reflects the average of the historical proportions
+    of the bottom-level series $y_{j,t}$
+    over the period $t=1,\dots,T$
+    relative to the total aggregate $y_t$.
+
+This approach is implemented in the `top_down()` function
+    by setting `method = "average_proportions"`.
+
+
+### Proportions of the historical averages
+
+$p_j = {\sum_{t=1}^{T}\frac{y_{j,t}}{T}} \Big/ {\sum_{t=1}^{T}\frac{y_t}{T}} ~~~~$
+    for $j=1,\dots,m$. </br>
+Each proportion $p_j$
+    captures the average historical value of the bottom-level series $y_{j,t}$
+    relative to the average value of the total aggregate $y_t$.
+
+This approach is implemented in the `top_down()` function
+    by setting `method = "proportion_averages"`.
+
+A convenient attribute of such top-down approaches is their simplicity. </br>
+One only needs to model and generate forecasts
+    for the most aggregated top-level series. </br>
+In general, these approaches seem to produce
+    quite reliable forecasts for the aggregate levels
+    and they are useful with low count data. </br>
+On the other hand, one disadvantage is
+    the loss of information due to aggregation. </br>
+Using such top-down approaches,
+    we are unable to capture and take advantage of individual series characteristics
+    such as time dynamics, special events, different seasonal patterns, etc.
+
+
+### Forecast proportions {#sec-forecast-proportions}
+
+Because historical proportions used for disaggregation
+    do not take account of how those proportions may change over time,
+    top-down approaches based on historical proportions
+    tend to produce less accurate forecasts at lower levels of the hierarchy
+    than bottom-up approaches. </br>
+To address this issue,
+    proportions based on forecasts rather than historical data can be used.
+
+Consider a one level hierarchy. </br>
+We first generate $h$-step-ahead forecasts for all of the series. </br>
+We don’t use these forecasts directly,
+    and they are not **coherent** (they don’t add up correctly). </br>
+Let’s call these **“initial” forecasts**. </br>
+We calculate the proportion of
+    each $h$-step-ahead initial forecast at the bottom level,
+    to the aggregate of all the $h$-step-ahead initial forecasts at this level. </br>
+We refer to these as the **forecast proportions**,
+    and we use them to disaggregate the top-level $h$-step-ahead initial forecast
+    in order to generate coherent forecasts for the whole of the hierarchy.
+
+For a $K$-level hierarchy,
+    this process is repeated for each node,
+    going from the top to the bottom level. </br>
+Applying this process leads to the following general rule
+    for obtaining the forecast proportions:
+    $p_j = \prod^{K-1}_{\ell=0}\frac{\hat{y}_{j,h}^{(\ell)}}{\hat{S}_{j,h}^{(\ell+1)}}$
+where
+    $j=1,2,\dots,m, ~~$
+    $\hat{y}_{j,h}^{(\ell)}$
+        is the $h$-step-ahead initial forecast of the series
+        that corresponds to the node which is $\ell$ levels above $j, ~~$ and
+    $\hat{S}_{j,h}^{(\ell)}$
+        is the sum of the $h$-step-ahead initial forecasts
+        below the node that is $\ell$ levels above node $j$
+        and are directly connected to that node. </br>
+These forecast proportions
+    disaggregate the $h$-step-ahead initial forecast of the Total series
+    to get $h$-step-ahead coherent forecasts of the bottom-level series.
+
+We will use the hierarchy of @fig-hierarchical-tree-diagram
+    to explain this notation
+    and to demonstrate how this general rule is reached. </br>
+Assume we have generated initial forecasts for each series in the hierarchy. </br>
+Recall that for the top-level “Total” series,
+    $\tilde{y}_{h} = \hat{y}_{h}$
+    for any top-down approach. </br>
+Here are some examples using the above notation:
+$$
+\begin{align}
+\hat{y}_{\text{A},h}^{(1)}
+    &= \hat{y}_{\text{B},h}^{(1)}
+    = \hat{y}_{h}
+    = \tilde{y}_{h}; \\
+\hat{y}_{\text{AA},h}^{(1)}
+    &= \hat{y}_{\text{AB},h}^{(1)}
+    = \hat{y}_{\text{AC},h}^{(1)}
+    = \hat{y}_{\text{A},h}; \\
+\hat{y}_{\text{AA},h}^{(2)}
+    &= \hat{y}_{\text{AB},h}^{(2)}
+    = \hat{y}_{\text{AC},h}^{(2)}
+    = \hat{y}_{\text{BA},h}^{(2)}
+    = \hat{y}_{\text{BB},h}^{(2)}
+    = \hat{y}_{h}
+    = \tilde{y}_{h}; \\
+\hat{S}_{AA,h}^{(1)}
+    &= \hat{S}_{AB,h}^{(1)}
+    = \hat{S}_{AC,h}^{(1)}
+    = \hat{y}_{AA,h} + \hat{y}_{AB,h} + \hat{y}_{AC,h}; \\
+\hat{S}_{AA,h}^{(2)}
+    &= \hat{S}_{AB,h}^{(2)}
+    = \hat{S}_{AC,h}^{(2)}
+    = \hat{S}_{A,h}^{(1)}
+    = \hat{S}_{B,h}^{(1)}
+    = \hat{S}_{h}
+    = \hat{y}_{A,h} + \hat{y}_{B,h}.
+\end{align}
+$$
+ 
+Moving down the farthest left branch of the hierarchy,
+    coherent forecasts are given by
+    $
+    \tilde{y}_{A,h}
+        = \Bigg(
+            \frac{\hat{y}_{A,h}}{\hat{S}_{A,h}^{(1)}}
+        \Bigg) \tilde{y}_{h}
+        = \Bigg(\frac{\hat{y}_{AA,h}^{(1)}}{\hat{S}_{AA,h}^{(2)}}\Bigg) \tilde{y}_{h} ~~~~
+    $
+    and
+    $ ~~~~
+    \tilde{y}_{AA,h}
+        = \Bigg(\frac{\hat{y}_{AA,h}}{\hat{S}_{AA,h}^{(1)}}\Bigg) \tilde{y}_{A,h}
+        = \Bigg(\frac{\hat{y}_{AA,h}}{\hat{S}_{AA,h}^{(1)}}\Bigg)
+            \Bigg(\frac{\hat{y}_{AA,h}^{(1)}}{\hat{S}_{AA,h}^{(2)}}\Bigg) \tilde{y}_{h}. ~~~~
+    $ </br>
+Consequently,
+    $ ~~~~
+    p_1 = \Bigg(\frac{\hat{y}_{AA,h}}{\hat{S}_{AA,h}^{(1)}}\Bigg)
+            \Bigg(\frac{\hat{y}_{AA,h}^{(1)}}{\hat{S}_{AA,h}^{(2)}}\Bigg).
+    $ </br>
+The other proportions can be obtained similarly.
+
+This approach is implemented in the `top_down()` function
+    by setting `method = "forecast_proportions"`. </br>
+Because this approach tends to work better than other top-down methods,
+    it is the default choice in the `top_down()` function
+    when no method argument is specified.
+
+One disadvantage of all top-down approaches,
+    is that they do not produce unbiased coherent forecasts
+    even if the base forecasts are unbiased.
+
+
+### Middle-out approach {#sec-middle-out-approach}
+
+The middle-out approach combines bottom-up and top-down approaches. </br>
+Again, it can only be used for strictly hierarchical aggregation structures.
+
+First, a “middle” level is chosen
+    and forecasts are generated for all the series at this level. </br>
+For the series above the middle level,
+    coherent forecasts are generated using the bottom-up approach
+    by aggregating the “middle-level” forecasts upwards. </br>
+For the series below the “middle level,”
+    coherent forecasts are generated using a top-down approach
+    by disaggregating the “middle level” forecasts downwards.
+
+This approach is implemented in the `middle_out()` function
+    by specifying the appropriate middle level via the `level` argument
+    and selecting the top-down approach with the `method` argument.
+
+
+## Forecast reconciliation {#sec-forecast-reconciliation}
+
+*Warning: the rest of this chapter is more advanced*
+    *and assumes a knowledge of some basic matrix algebra.*
+
+### Matrix notation {#sec-matrix-notation}
+
+Recall that @eq-total-toplevel and @eq-total-middlelevel represent how data,
+    that adhere to the hierarchical structure of @fig-hierarchical-tree-diagram,
+    aggregate. </br>
+Similarly @eq-total-middlelevel-AB and @eq-total-middlelevel-XY represent how data,
+    that adhere to the grouped structure of @fig-group-tree,
+    aggregate. </br>
+These equations can be thought of as aggregation constraints or summing equalities,
+    and can be more efficiently represented using matrix notation.
+
+For any aggregation structure we construct an $n \times m$ matrix $\bm{S}$
+    (referred to as the **summing matrix**)
+    which dictates the way in which the bottom-level series aggregate.
+
+For the hierarchical structure in @fig-hierarchical-tree-diagram, we can write
+$$
+\begin{bmatrix}
+    y_{t} \\ y_{A,t} \\ y_{B,t} \\
+    y_{AA,t} \\ y_{AB,t} \\ y_{AC,t} \\
+    y_{BA,t} \\ y_{BB,t}
+\end{bmatrix} =
+\begin{bmatrix}
+    1 & 1 & 1 & 1 & 1 \\ 1 & 1 & 1 & 0 & 0 \\ 0 & 0 & 0 & 1 & 1 \\
+    1 & 0 & 0 & 0 & 0 \\ 0 & 1 & 0 & 0 & 0 \\ 0 & 0 & 1 & 0 & 0 \\
+    0 & 0 & 0 & 1 & 0 \\ 0 & 0 & 0 & 0 & 1
+\end{bmatrix}
+\begin{bmatrix}
+    y_{AA,t} \\ y_{AB,t} \\ y_{AC,t} \\
+    y_{BA,t} \\ y_{BB,t}
+\end{bmatrix}
+$$
+or in more compact notation
+$$
+\bm{y}_t = \bm{S} \bm{b}_{t}
+$$ {#eq-hierarchical-tree-diagram-aggregation}
+where
+    $\bm{y}_t$ is an $n$-dimensional vector
+        of all the observations in the hierarchy at time $t$,
+    $\bm{S}$ is the summing matrix, and
+    $\bm{b}_t$ is an $m$-dimensional vector
+        of all the observations in the bottom level of the hierarchy
+        at time $t$. </br>
+Note that the first row in the summing matrix $\bm{S}$
+    represents @eq-total-toplevel,
+    the second and third rows represent @eq-total-middlelevel. </br>
+The rows below these comprise an $m$-dimensional identity matrix $\bm{I}_m$
+    so that each bottom-level observation on the right hand side of the equation
+    is equal to itself on the left hand side.
+
+Similarly for the grouped structure of @fig-group-tree we write
+$$
+\begin{bmatrix}
+    y_{t} \\
+    y_{A,t} \\ y_{B,t} \\ y_{X,t} \\ y_{Y,t} \\
+    y_{AX,t} \\ y_{AY,t} \\ y_{BX,t} \\ y_{BY,t}
+\end{bmatrix} =
+\begin{bmatrix}
+    1 & 1 & 1 & 1 \\
+    1 & 1 & 0 & 0 \\ 0 & 0 & 1 & 1 \\ 1 & 0 & 1 & 0 \\ 0 & 1 & 0 & 1 \\
+    1 & 0 & 0 & 0 \\ 0 & 1 & 0 & 0 \\ 0 & 0 & 1 & 0 \\ 0 & 0 & 0 & 1
+\end{bmatrix}
+\begin{bmatrix}
+    y_{AX,t} \\ y_{AY,t} \\
+    y_{BX,t} \\ y_{BY,t}
+\end{bmatrix}, 
+$$
+or
+$$
+y_t = S.b_t,
+$$ {#eq-group-tree-aggregation}
+where
+    the second and third rows of $\bm{S}$ represent @eq-total-middlelevel-AB and
+    the fourth and fifth rows represent @eq-total-middlelevel-XY.
+
+
+### Mapping matrices {#sec-mapping-matrices}
+
+This matrix notation allows us to represent all forecasting methods
+    for hierarchical or grouped time series
+    using a common notation.
+
+Suppose we forecast all series ignoring any aggregation constraints. </br>
+We call these the base forecasts and denote them by $\hat{\bm{y}}_h$
+    where $h$ is the forecast horizon. </br>
+They are stacked in the same order as the data $\bm{y}_t$.
+
+Then all coherent forecasting approaches
+    for either hierarchical or grouped structures
+    can be represented as
+$$
+\tilde{\bm{y}}_h = \bm{S} \bm{G} \hat{\bm{y}}_h,
+$$ {#eq-coherent-forecast}
+where
+    $\bm{G}$ is a matrix that maps the base forecasts into the bottom level, and
+    the summing matrix $\bm{S}$ sums these up using the aggregation structure
+        to produce a set of **coherent forecasts** $\tilde{\bm{y}}_h$. </br>
+    (Actually, some recent nonlinear reconciliation methods
+        require a slightly more complicated equation.
+        This equation is for general linear reconciliation methods.)
+
+The $\bm{G}$ matrix is defined according to the approach implemented. </br>
+**example**
+    if the bottom-up approach is used to forecast the hierarchy of
+    @fig-hierarchical-tree-diagram, then
+$$
+\bm{G} =
+\begin{bmatrix}
+    0 & 0 & 0 & 1 & 0 & 0 & 0 & 0 \\ 0 & 0 & 0 & 0 & 1 & 0 & 0 & 0 \\
+    0 & 0 & 0 & 0 & 0 & 1 & 0 & 0 \\ 0 & 0 & 0 & 0 & 0 & 0 & 1 & 0 \\
+    0 & 0 & 0 & 0 & 0 & 0 & 0 & 1\\
+\end{bmatrix}. 
+$$
+Notice that $\bm{G}$ contains two partitions. </br>
+The first three columns zero out
+    the base forecasts of the series above the bottom level,
+    while the $m$-dimensional identity matrix
+    picks only the base forecasts of the bottom level. </br>
+These are then summed by the $\bm{S}$ matrix.
+
+If any of the top-down approaches were used then
+$$
+\bm{G} =
+\begin{bmatrix}
+    p_1 & 0 & 0 & 0 & 0 & 0 & 0 & 0 \\ p_2 & 0 & 0 & 0 & 0 & 0 & 0 & 0 \\
+    p_3 & 0 & 0 & 0 & 0 & 0 & 0 & 0 \\ p_4 & 0 & 0 & 0 & 0 & 0 & 0 & 0 \\
+    p_5 & 0 & 0 & 0 & 0 & 0 & 0 & 0 \\
+\end{bmatrix}.
+$$
+
+The first column includes the set of proportions
+    that distribute the base forecasts of the top level to the bottom level. </br>
+These are then summed up by the $\bm{S}$ matrix. </br>
+The rest of the columns zero out the base forecasts
+    below the highest level of aggregation.
+
+For a middle out approach,
+    the $\bm{G}$ matrix will be a combination of the above two. </br>
+Using a set of proportions,
+    the base forecasts of some pre-chosen level
+    will be disaggregated to the bottom level,
+    all other base forecasts will be zeroed out,
+    and the bottom-level forecasts
+    will then summed up the hierarchy via the summing matrix.
+
+
+### Forecast reconciliation {#sec-forecast-reconciliation}
+
+@eq-coherent-forecast shows that
+    pre-multiplying any set of base forecasts with $\bm{S} \bm{G}$
+    will return a set of coherent forecasts.
+
+The traditional methods considered so far are limited in that
+    they only use base forecasts from a single level of aggregation
+    which have either been aggregated or disaggregated
+    to obtain forecasts at all other levels. </br>
+Hence, they use limited information. </br>
+However, in general, we could use other $\bm{G}$ matrices,
+    and then $\bm{S} \bm{G}$ combines and reconciles all the base forecasts
+    in order to produce coherent forecasts.
+
+In fact, we can find the optimal $\bm{G}$ matrix
+    to give the most accurate reconciled forecasts.
+
+
+### The MinT optimal reconciliation approach {#sec-mint-optimal-reconciliation}
+
+Wickramasuriya et al. (2019) found a $\bm{G}$ matrix
+    that minimises the total forecast variance of the set of coherent forecasts,
+    leading to the **MinT (Minimum Trace) optimal reconciliation approach**.
+
+Suppose we generate coherent forecasts using @eq-coherent-forecast. </br>
+First we want to make sure we have unbiased forecasts. </br>
+If the base forecasts $\hat{\bm{y}}_h$ are unbiased,
+    then the coherent forecasts $\tilde{\bm{y}}_h$ will be unbiased provided
+    $\bm{S} \bm{G} \bm{S} = \bm{S}$. </br>
+this is equivalent to $\bm{S} \bm{G}$ being a projection matrix
+    onto the $m$-dimensional coherent subspace for which
+    the aggregation constraints hold. </br>
+This provides a constraint on the matrix $\bm{G}$. </br>
+Interestingly, no top-down method satisfies this constraint,
+    so all top-down approaches result in biased coherent forecasts.
+
+Next we need to find the errors in our forecasts. </br>
+Wickramasuriya et al. (2019) show that
+    the variance-covariance matrix of the $h$-step-ahead coherent forecast errors
+    is given by
+$$
+\bm{V}_h
+    = \text{Var}[\bm{y}_{T+h} - \tilde{\bm{y}}_h]
+    = \bm{S} \bm{G} \bm{W}_h \bm{G}' \bm{S}'
+$$
+where
+    $\bm{W}_h = \text{Var}[(\bm{y}_{T+h} - \hat{\bm{y}}_h)]$
+    is the variance-covariance matrix of the corresponding base forecast errors.
+
+The objective is to find a matrix $\bm{G}$
+    that minimises the error variances of the coherent forecasts. </br>
+These error variances are on the diagonal of the matrix $\bm{V}_h$,
+    and so the sum of all the error variances is given by
+    the trace of the matrix $\bm{V}_h$. </br>
+Wickramasuriya et al. (2019) show that
+    the matrix $\bm{G}$ which minimises the trace of $\bm{V}_h$
+    such that $\bm{S} \bm{G} \bm{S} = \bm{S}$,
+    is given by
+    $\bm{G} = (\bm{S}' \bm{W}_h^{-1} \bm{S})^{-1} \bm{S}' \bm{W}_h^{-1}.$ </br>
+Therefore, the optimally reconciled forecasts are given by
+$$
+\tilde{\bm{y}}_h = \bm{S}(\bm{S}' \bm{W}_h^{-1} \bm{S})^{-1} \bm{S}' \bm{W}_h^{-1} \hat{\bm{y}}_h.
+$$ {#eq-mint}
+
+We refer to this as the
+    **MinT (or Minimum Trace) optimal reconciliation approach**. </br>
+MinT is implemented by `min_trace()` within the `reconcile()` function.
+
+To use this in practice,
+    we need to estimate $\bm{W}_h$,
+        the forecast error variance of the $h$-step-ahead base forecasts. </br>
+This can be difficult,
+    and so we provide four simplifying approximations
+    that have been shown to work well in both simulations and in practice.
+
+1. Set $\bm{W}_h = k_h \bm{I}$ for all $h$, where $k_h > 0$.
+    Note that $k_h$ is a proportionality constant.
+    It does not need to be estimated or specified here
+        as it gets cancelled out in @eq-mint.
+    This is the most simplifying assumption to make,
+    and means that $\bm{G}$ is independent of the data,
+    providing substantial computational savings. </br>
+    The disadvantage, however,
+        is that this specification does not account for
+        the differences in scale between the levels of the structure,
+        or for relationships between series.
+
+    Setting $\bm{W}_h=k_h\bm{I}$ in @eq-mint
+        gives the ordinary least squares (OLS) estimator
+        we introduced in @sec-matrix-formulation (Chapter 7)
+        with $\bm{X} = \bm{S}$ and $\bm{y} = \hat{\bm{y}}$. </br>
+    Hence this approach is usually referred to **OLS reconciliation**. </br>
+    It is implemented in `min_trace()`
+        by setting `method = "ols"`.
+
+2. Set $\bm{W}_{h} = k_{h} \text{diag}(\hat{\bm{W}}_{1}) ~~~~$ for all $h$,
+    where
+        $k_{h} > 0$,
+        $\hat{\bm{W}}_{1} = \frac{1}{T} \sum_{t=1}^{T}\bm{e}_{t} \bm{e}_{t}',$ and
+        $\bm{e}_{t}$ is an $n$-dimensional vector of residuals
+            of the models that generated the base forecasts
+            stacked in the same order as the data.
+
+    This specification scales the base forecasts using the variance of the residuals
+        and it is therefore referred to as the
+        **WLS (weighted least squares) estimator using variance scaling**. </br>
+    The approach is implemented in `min_trace()`
+        by setting `method = "wls_var"`.
+
+3. Set $\bm{W}_{h} = k_{h} \bm{\Lambda}$ for all $h$,
+    where
+        $k_{h} > 0$,
+        $\bm{\Lambda} = \text{diag}(\bm{S} \bm{1})$,
+        and $\bm{1}$ is
+            a unit vector of dimension $m$ (the number of bottom-level series).
+
+    This specification assumes that
+        the bottom-level base forecast errors each have variance $k_h$ and
+        are uncorrelated between nodes. </br>
+    Hence each element of the diagonal $\bm{\Lambda}$ matrix
+        contains the number of forecast error variances
+        contributing to each node. </br>
+    This estimator only depends on the structure of the aggregations,
+        and not on the actual data. </br>
+    It is therefore referred to as **structural scaling**. </br>
+    Applying the structural scaling specification is particularly useful in cases
+        where residuals are not available,
+        and so variance scaling cannot be applied;
+    **example**,
+        in cases where the base forecasts are generated by
+        judgmental forecasting [Chapter 6](./chapter_6__Judgmental_forecasts.qmd). </br>
+    The approach is implemented in `min_trace()`
+        by setting `method = "wls_struct"`.
+
+4. Set $\bm{W}_h = k_h \bm{W}_1$ for all $h$,
+    where $k_h > 0$. </br>
+    Here we only assume that the error covariance matrices
+        are proportional to each other,
+        and we directly estimate the full one-step covariance matrix $\bm{W}_1$. </br>
+    The most obvious and simple way would be to use the sample covariance. </br>
+    This is implemented in `min_trace()`
+        by setting `method = "mint_cov"`.
+
+    However, for cases where
+        the number of bottom-level series $m$ is large
+        compared to the length of the series $T$,
+        this is not a good estimator. </br>
+    Instead we use a shrinkage estimator
+        which shrinks the sample covariance to a diagonal matrix. </br>
+    This is implemented in `min_trace()`
+        by setting `method = "mint_shrink"`.
+
+In summary, unlike any other existing approach,
+    the optimal reconciliation forecasts are generated
+    using all the information available
+    within a hierarchical or a grouped structure. </br>
+This is important,
+    as particular aggregation levels or groupings may reveal features of the data
+    that are of interest to the user
+    and are important to be modelled. </br>
+These features may be completely hidden or not easily identifiable at other levels.
+
+**example**,
+    consider the Australian tourism data
+    introduced in @sec-hierarchical-grouped-time-series,
+    where the hierarchical structure followed
+    the geographic division of a country into states and regions. </br>
+Some areas will be largely summer destinations,
+    while others may be winter destinations. </br>
+We saw in @fig-domestic-trips-by-state-seasonal-plots
+    the contrasting seasonal patterns
+    between the northern and the southern states. </br>
+These differences will be smoothed at the country level due to aggregation.
+
+
+## Forecasting Australian domestic tourism {#sec-forecasting-domestic-tourism}
+
+We will compute forecasts for the Australian tourism data
+    that was described in @sec-hierarchical-grouped-time-series. </br>
+We use the data up to the end of 2015 as a training set,
+    withholding the final two years (eight quarters, 2016Q1–2017Q4)
+    as a test set for evaluation. </br>
+The code below demonstrates the full workflow
+    for generating coherent forecasts using the bottom-up, OLS and MinT methods.
+```{r}
+tourism_full <- tourism %>%
+  aggregate_key((State/Region) * Purpose, Trips = sum(Trips))
+
+fit <- tourism_full %>%
+  filter(year(Quarter) <= 2015) %>%
+  model(base = ETS(Trips)) %>%
+  reconcile(
+    bu = bottom_up(base),
+    ols = min_trace(base, method = "ols"),
+    mint = min_trace(base, method = "mint_shrink"),
+  )
+```
+
+Here, `fit` contains the base ETS model
+    (discussed in [Chapter 8](./chapter_8__Exponential_Smoothing.qmd))
+    for each series in `tourism_full`,
+    along with the three methods for producing coherent forecasts
+    as specified in the `reconcile()` function.
+```{r}
+fc <- fit %>% forecast(h = "2 years")
+```
+
+Passing `fit` into `forecast()` generates base and coherent forecasts
+    across all the series in the aggregation structure. </br>
+@fig-overnight-trips-forecasts and @fig-overnight-trips-by-purpose-forecasts
+    plot the four point forecasts for the overnight trips
+    for the Australian total, the states, and the purposes of travel,
+    along with the actual observations of the test set.
+```{r}
+#| label: fig-overnight-trips-forecasts
+#| fig-cap: "Forecasts of overnight trips for Australia and its states over the test period 2016Q1–2017Q4."
+fc %>%
+  filter(is_aggregated(Region), is_aggregated(Purpose)) %>%
+  autoplot(
+    tourism_full %>% filter(year(Quarter) >= 2011),
+    level = NULL
+  ) +
+  labs(y = "Trips ('000)") +
+  facet_wrap(vars(State), scales = "free_y")
+
+
+#| label: fig-overnight-trips-by-purpose-forecasts
+#| fig-cap: "Forecasts of overnight trips by purpose of travel over the test period 2016Q1–2017Q4."
+fc %>%
+  filter(is_aggregated(State), !is_aggregated(Purpose)) %>%
+  autoplot(
+    tourism_full %>% filter(year(Quarter) >= 2011),
+    level = NULL
+  ) +
+  labs(y = "Trips ('000)") +
+  facet_wrap(vars(Purpose), scales = "free_y")
+```
+
+To make it easier to see the differences,
+    we have included only the last five years of the training data,
+    and have omitted the prediction intervals. </br>
+In most panels, the increase in overnight trips,
+    especially in the second half of the test set,
+    is higher than what is predicted by the point forecasts. </br>
+This is particularly noticeable for the mainland eastern states of
+    ACT, New South Wales, Queensland and Victoria,
+    and across all purposes of travel.
+
+The accuracy of the forecasts over the test set can be evaluated
+    using the `accuracy()` function. </br>
+We summarise some results using `RMSE` and `MASE`. </br>
+The following code generates the accuracy measures for the aggregate series. </br>
+Similar code is used to evaluate forecasts for other levels.
+```{r}
+acc_T <- fc %>%
+  filter(is_aggregated(State), is_aggregated(Purpose)) %>%
+  accuracy(
+    data = tourism_full,
+    measures = list(rmse = RMSE, mase = MASE)
+  ) %>%
+  group_by(.model) %>%
+  summarise(rmse = mean(rmse), mase = mean(mase)) %>%
+  mutate(Level = "Total")
+
+
+acc_P <- fc %>%
+  filter(is_aggregated(State), !is_aggregated(Purpose)) %>%
+  accuracy(
+    data = tourism_full,
+    measures = list(rmse = RMSE, mase = MASE)
+  ) %>%
+  group_by(.model) %>%
+  summarise(rmse = mean(rmse), mase = mean(mase)) %>%
+  mutate(Level = "Purpose")
+
+
+acc_S <- fc %>%
+  filter(!is_aggregated(State), is_aggregated(Purpose), is_aggregated(Region)) %>%
+  accuracy(
+    data = tourism_full,
+    measures = list(rmse = RMSE, mase = MASE)
+  ) %>%
+  group_by(.model) %>%
+  summarise(rmse = mean(rmse), mase = mean(mase)) %>%
+  mutate(Level = "State")
+
+
+acc_R <- fc %>%
+  filter(!is_aggregated(Region), is_aggregated(Purpose)) %>%
+  accuracy(
+    data = tourism_full,
+    measures = list(rmse = RMSE, mase = MASE)
+  ) %>%
+  group_by(.model) %>%
+  summarise(rmse = mean(rmse), mase = mean(mase)) %>%
+  mutate(Level = "Region")
+
+
+acc_B <- fc %>%
+  filter(!is_aggregated(Region), !is_aggregated(Purpose)) %>%
+  accuracy(
+    data = tourism_full,
+    measures = list(rmse = RMSE, mase = MASE)
+  ) %>%
+  group_by(.model) %>%
+  summarise(rmse = mean(rmse), mase = mean(mase)) %>%
+  mutate(Level = "Bottom")
+
+
+acc_A <- fc %>%
+  accuracy(
+    data = tourism_full,
+    measures = list(rmse = RMSE, mase = MASE)
+  ) %>%
+  group_by(.model) %>%
+  summarise(rmse = mean(rmse), mase = mean(mase)) %>%
+  mutate(Level = "All series")
+
+
+bind_rows(acc_T, acc_P, acc_S, acc_R, acc_B, acc_A) %>%
+  relocate(Level) %>%
+  pivot_wider(names_from = .model, values_from = c(rmse, mase))
+```
+
+The scales of the series at different levels of aggregation are quite different,
+    due to aggregation. </br>
+Hence, we need to be cautious when comparing or calculating
+    scale dependent error measures, such as the RMSE, across levels
+    as the aggregate series will dominate. </br>
+Therefore, we compare error measures across each level of aggregation,
+    before providing the error measures
+    across all the series in the bottom-row. </br>
+Notice, that the RMSE increases as we go from
+    the bottom level to the aggregate levels above.
+
+Reconciling the base forecasts using OLS and MinT
+    results in more accurate forecasts
+    compared to the bottom-up approach. </br>
+This result is commonly observed in applications
+    as reconciliation approaches use information from all levels of the structure,
+    resulting in more accurate coherent forecasts
+    compared to the older traditional methods which use limited information. </br>
+Furthermore, reconciliation usually improves
+    the incoherent base forecasts for almost all levels.
+
+
+## Reconciled distributional forecasts {#sec-reconciled-distributional-forecasts}
+
+So far we have only discussed the reconciliation of point forecasts. </br>
+However, we are usually also interested in the forecast distributions
+    so that we can compute prediction intervals.
+
+Panagiotelis et al. (2020) present several important results
+    for generating reconciled probabilistic forecasts. </br>
+We focus here on two fundamental results
+    that are implemented in the `reconcile()` function. </br>
+1. If the base forecasts are normally distributed, i.e.,
+    $\hat{\bm{y}}_h \sim N(\hat{\bm\mu}_h, \hat{\bm\Sigma}_h),$
+    then the reconciled forecasts are also normally distributed,
+    $\tilde{\bm{y}}_h \sim N(\bm{S} \bm{G} \hat{\bm{\mu}}_h, \bm{S} \bm{G} \hat{\bm{\Sigma}}_{h} \bm{G}' \bm{S}').$
+
+2. If it is unreasonable to assume normality for the base forecasts,
+    we can use bootstrapping. </br>
+    Bootstrapped prediction intervals were introduced in
+        @sec-distributional-forecasts-prediction-intervals (Chapter 5). </br>
+    The same idea can be used here. </br>
+    We can simulate future sample paths from the model(s)
+        that produce the base forecasts,
+        and then reconcile these sample paths. </br>
+    Coherent prediction intervals can be computed from the reconciled sample paths.
+
+    Suppose that $(\hat{\bm{y}}_h^{[1]}, \dots, \hat{\bm{y}}_h^{[B]})$
+        are a set of $B$ simulated sample paths,
+        generated independently from the models
+        used to produce the base forecasts. </br>
+    Then $(\bm{S} \bm{G} \hat{\bm{y}}_h^{[1]}, \dots, \bm{S} \bm{G} \hat{\bm{y}}_h^{[B]})$
+        provides a set of reconciled sample paths,
+        from which percentiles can be calculated
+        in order to construct coherent prediction intervals.
+
+    To generate bootstrapped prediction intervals in this way,
+        we simply set `bootstrap = TRUE` in the `forecast()` function.
+
+
+## Forecasting Australian prison population {#sec-forecasting-prison-population}
+
+Returning to the Australian prison population data
+    (@sec-hierarchical-grouped-time-series),
+    we will compare the forecasts from
+    bottom-up and MinT methods applied to base ETS models,
+    using a test set comprising
+    the final two years or eight quarters 2015Q1–2016Q4 of the available data.
+```{r}
+#| label: fig-prison-population-forecasts
+#| fig-cap: "Forecasts for the total Australian quarterly adult prison population for the period 2015Q1–2016Q4."
+fit <- prison_gts %>%
+  filter(year(Quarter) <= 2014) %>%
+  model(base = ETS(Count)) %>%
+  reconcile(
+    bottom_up = bottom_up(base),
+    MinT = min_trace(base, method = "mint_shrink")
+  )
+
+fc <- fit %>% forecast(h = 8)
+
+fc %>%
+  filter(is_aggregated(State), is_aggregated(Gender), is_aggregated(Legal)) %>%
+  autoplot(prison_gts, alpha = 0.7, level = 90) +
+  labs(y = "Number of prisoners ('000)", title = "Australian prison population (total)")
+```
+
+@fig-prison-population-forecasts shows the three sets of forecasts
+    for the aggregate Australian prison population. </br>
+The base and bottom-up forecasts from the ETS models
+    seem to underestimate the trend over the test period. </br>
+The MinT approach
+    combines information from all the base forecasts in the aggregation structure;
+    in this case, the base forecasts at the top level are adjusted upwards.
+
+The MinT reconciled prediction intervals
+    are much tighter than the base forecasts,
+    due to MinT being based on an estimator that minimizes variances. </br>
+The base forecast distributions are also incoherent,
+    and therefore carry with them the extra uncertainty of the incoherency error.
+
+We exclude the bottom-up forecasts from the remaining plots
+    in order to simplify the visual exploration. </br>
+However, we do revisit their accuracy in the evaluation results presented later.
+
+@fig-prison-population-by-state-forecasts – @fig-prison-population-bottom-forecasts
+    show the MinT and base forecasts at various levels of aggregation. </br>
+To make it easier to see the effect,
+    we only show the last five years of training data. </br>
+In general, MinT adjusts the base forecasts in the direction of the test set,
+    hence improving the forecast accuracy. </br>
+There is no guarantee that MinT reconciled forecasts will be more accurate
+    than the base forecasts for every series,
+    but they will be more accurate on average.
+```{r}
+#| label: fig-prison-population-by-state-forecasts
+#| fig-cap: "Forecasts for the Australian quarterly adult prison population, disaggregated by state."
+fc %>%
+  filter(
+    .model %in% c("base", "MinT"),
+    !is_aggregated(State), is_aggregated(Legal), is_aggregated(Gender)
+  ) %>%
+  autoplot(
+    prison_gts %>% filter(year(Quarter) >= 2010),
+    alpha = 0.7, level = 90
+  ) +
+  labs(title = "Prison population (by state)", y = "Number of prisoners ('000)") +
+  facet_wrap(vars(State), scales = "free_y", ncol = 4) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+@fig-prison-population-by-state-forecasts shows
+    forecasts for each of the eight states. </br>
+There is a general upward trend
+    during the test set period across all the states. </br>
+However, there appears to be a relatively large and sudden surge
+    in New South Wales and Tasmania,
+    which means the test set observations are well outside
+    the upper bound of the forecast intervals for both these states. </br>
+Because New South Wales is the state with the largest prison population,
+    this surge will have a substantial impact on the total. </br>
+In contrast, Victoria shows a substantial dip in 2015Q2–2015Q3,
+    before returning to an upward trend. </br>
+This dip is not captured in any of the Victorian forecasts.
+```{r}
+#| label: fig-prison-population-by-legal-gender-forecasts
+#| fig-cap: "Forecasts for the Australian quarterly adult prison population, disaggregated by legal status and by gender."
+p1 <- fc %>%
+  filter(
+    .model %in% c("base", "MinT"),
+    is_aggregated(State), !is_aggregated(Legal), is_aggregated(Gender)
+  ) %>%
+  autoplot(
+    prison_gts %>% filter(year(Quarter) >= 2010),
+    alpha = 0.7, level = 90
+  ) +
+  labs(title = "Prison population (by legal status)", y = "Number of prisoners ('000)") +
+  facet_wrap(vars(Legal), scales = "free_y", ncol = 4) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+p2 <- fc %>%
+  filter(
+    .model %in% c("base", "MinT"),
+    is_aggregated(State), is_aggregated(Legal), !is_aggregated(Gender)
+  ) %>%
+  autoplot(
+    prison_gts %>% filter(year(Quarter) >= 2010),
+    alpha = 0.7, level = 90
+  ) +
+  labs(title = "Prison population (by gender)", y = "Number of prisoners ('000)") +
+  facet_wrap(vars(Gender), scales = "free_y", ncol = 4) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+p1 + p2 + plot_layout(guides = "collect")
+
+
+#| label: fig-prison-population-bottom-forecasts
+#| fig-cap: "Forecasts for bottom-level series the Australian quarterly adult prison population, disaggregated by state, by legal status and by gender."
+fc %>%
+  filter(
+    .model %in% c("base", "MinT"),
+    as.character(State) %in% c("NSW", "QLD", "VIC", "WA"),
+    !is_aggregated(State), !is_aggregated(Legal), !is_aggregated(Gender)
+  ) %>%
+  autoplot(
+    prison_gts %>% filter(year(Quarter) >= 2010),
+    alpha = 0.7, level = 90
+  ) +
+  labs(title = NULL, y = "Number of prisoners ('000)") +
+  facet_wrap(~ interaction(Gender, Legal, sep = " + ", lex.order = TRUE) + State, scales = "free_y") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+@fig-prison-population-bottom-forecasts shows
+    the forecasts for some selected bottom-level series
+    of the Australian prison population. </br>
+The four largest states are represented across the columns,
+    with legal status and gender down the rows. </br>
+These allow for some interesting analysis and observations
+    that have policy implications. </br>
+The large increase observed across the states during the 2015Q1–2016Q4 test period
+    appears to be driven by large increases in the remand prison population. </br>
+These increases seem to be generally missed by both forecasts. </br>
+In contrast to the other states,
+    for New South Wales there is also a substantial increase
+    in the sentenced prison population. </br>
+In particular, the increase in numbers of sentenced males in NSW
+    contributes substantially to the rise in state and national prison numbers.
+
+Using the `accuracy()` function,
+    we evaluate the forecast accuracy across the grouped structure. </br>
+The code below evaluates the forecast accuracy
+    for only the top-level national aggregate
+    of the Australian prison population time series. </br>
+Similar code is used for the rest of the results
+```{r}
+acc_T <- fc %>%
+  filter(is_aggregated(State), is_aggregated(Gender), is_aggregated(Legal)) %>%
+  accuracy(data = prison_gts, measures = list(mase = MASE, ss = skill_score(CRPS))) %>%
+  group_by(.model) %>%
+  summarise(mase = mean(mase), sspc = mean(ss) * 100) %>%
+  mutate(Level = "Total")
+
+acc_S <- fc %>%
+  filter(!is_aggregated(State), is_aggregated(Gender), is_aggregated(Legal)) %>%
+  accuracy(data = prison_gts, measures = list(mase = MASE, ss = skill_score(CRPS))) %>%
+  group_by(.model) %>%
+  summarise(mase = mean(mase), sspc = mean(ss) * 100) %>%
+  mutate(Level = "State")
+
+acc_L <- fc %>%
+  filter(is_aggregated(State), is_aggregated(Gender), !is_aggregated(Legal)) %>%
+  accuracy(data = prison_gts, measures = list(mase = MASE, ss = skill_score(CRPS))) %>%
+  group_by(.model) %>%
+  summarise(mase = mean(mase), sspc = mean(ss) * 100) %>%
+  mutate(Level = "Legal")
+
+acc_G <- fc %>%
+  filter(is_aggregated(State), !is_aggregated(Gender), is_aggregated(Legal)) %>%
+  accuracy(data = prison_gts, measures = list(mase = MASE, ss = skill_score(CRPS))) %>%
+  group_by(.model) %>%
+  summarise(mase = mean(mase), sspc = mean(ss) * 100) %>%
+  mutate(Level = "Gender")
+
+acc_B <- fc %>%
+  filter(!is_aggregated(State), !is_aggregated(Gender), !is_aggregated(Legal)) %>%
+  accuracy(data = prison_gts, measures = list(mase = MASE, ss = skill_score(CRPS))) %>%
+  group_by(.model) %>%
+  summarise(mase = mean(mase), sspc = mean(ss) * 100) %>%
+  mutate(Level = "Bottom")
+
+acc_A <- fc %>%
+  accuracy(data = prison_gts, measures = list(mase = MASE, ss = skill_score(CRPS))) %>%
+  group_by(.model) %>%
+  summarise(mase = mean(mase), sspc = mean(ss) * 100) %>%
+  mutate(Level = "All series")
+
+bind_rows(acc_T, acc_S, acc_L, acc_G, acc_B, acc_A) %>%
+  pivot_wider(names_from = .model, values_from = c(mase, sspc))
+```
+
+We use scaled measures
+    because the numbers of prisoners vary substantially across the groups. </br>
+The MASE gives a scaled measure of point-forecast accuracy
+    (see @sec-evaluating-point-forecast-accuracy (Chapter 5)),
+    while the CRPS skill score
+        gives a scaled measure of distributional forecast accuracy
+        (see @sec-evaluating-distributional-forecast-accuracy (Chapter 5)). </br>
+A low value of MASE indicates a good forecast,
+    while a high value of the skill score indicates a good forecast.
+
+The results show that the MinT reconciled forecasts
+    improve on the accuracy of the base forecasts
+    and are also more accurate than the bottom-up forecasts. </br>
+As the MinT optimal reconciliation approach
+    uses information from all levels in the structure,
+    it generates more accurate forecasts
+    than the traditional approaches (such as bottom-up)
+    which use limited information.
+
+
+## Exercises
+
+
+## Future Reading
